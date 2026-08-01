@@ -88,6 +88,27 @@ function requestUserConfirmation(url) {
   });
 }
 
+const pendingConfirmations = new Map(); // requestId -> callback
+
+function openConfirmationPopup(url, callback) {
+  const requestId = crypto.randomUUID();
+  pendingConfirmations.set(requestId, callback);
+  const popupUrl = browser.runtime.getURL(
+    `popup-confirm/confirm.html?url=${encodeURIComponent(url)}&requestId=${requestId}`
+  );
+  browser.windows.create({ url: popupUrl, type: 'popup', width: 360, height: 200 });
+}
+
+browser.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'confirmation-response') {
+    const callback = pendingConfirmations.get(msg.requestId);
+    if (callback) {
+      pendingConfirmations.delete(msg.requestId);
+      callback(msg.choice);
+    }
+  }
+});
+
 function checkLease(sessionId, tabId) {
   const owner = leaseOwner.get(tabId);
   if (!owner) return { ok: false, error: 'not_leased' };
