@@ -27,7 +27,24 @@ test('createDecoder handles two messages arriving back-to-back in one chunk', ()
   assert.deepEqual(received, [{ n: 1 }, { n: 2 }]);
 });
 
-test('encodeMessage throws when the encoded body exceeds MAX_MESSAGE_BYTES', () => {
-  const huge = { data: 'x'.repeat(MAX_MESSAGE_BYTES) };
-  assert.throws(() => encodeMessage(huge), /exceeds MAX_MESSAGE_BYTES/);
+test('encodeMessage throws when total frame (header + body) exceeds MAX_MESSAGE_BYTES', () => {
+  // Helper to create a payload with a specific JSON-encoded byte length
+  function makePayload(targetLen) {
+    // Start with minimal payload and calculate padding needed
+    const base = { p: '' };
+    const baseLen = Buffer.byteLength(JSON.stringify(base), 'utf8');
+    const paddingLen = targetLen - baseLen;
+    return { p: 'x'.repeat(Math.max(0, paddingLen)) };
+  }
+
+  // Test 1: A payload encoding to MAX_MESSAGE_BYTES - 4 bytes should NOT throw
+  // Total frame = 4-byte header + (MAX_MESSAGE_BYTES - 4) body = MAX_MESSAGE_BYTES (exactly at cap)
+  const okPayload = makePayload(MAX_MESSAGE_BYTES - 4);
+  const buf = encodeMessage(okPayload);
+  assert.equal(buf.length, MAX_MESSAGE_BYTES);
+
+  // Test 2: A payload encoding to MAX_MESSAGE_BYTES - 3 bytes should throw
+  // Total frame = 4-byte header + (MAX_MESSAGE_BYTES - 3) body = MAX_MESSAGE_BYTES + 1 (exceeds cap)
+  const tooLargePayload = makePayload(MAX_MESSAGE_BYTES - 3);
+  assert.throws(() => encodeMessage(tooLargePayload), /exceeds MAX_MESSAGE_BYTES/);
 });

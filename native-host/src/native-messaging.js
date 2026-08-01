@@ -2,8 +2,9 @@ export const MAX_MESSAGE_BYTES = 1024 * 1024; // Firefox native messaging cap (1
 
 export function encodeMessage(obj) {
   const json = Buffer.from(JSON.stringify(obj), 'utf8');
-  if (json.length > MAX_MESSAGE_BYTES) {
-    throw new Error(`Encoded message (${json.length} bytes) exceeds MAX_MESSAGE_BYTES (${MAX_MESSAGE_BYTES})`);
+  // Account for 4-byte header: total frame (header + body) must not exceed MAX_MESSAGE_BYTES
+  if (json.length + 4 > MAX_MESSAGE_BYTES) {
+    throw new Error(`Encoded message (${json.length + 4} bytes total with header) exceeds MAX_MESSAGE_BYTES (${MAX_MESSAGE_BYTES})`);
   }
   const header = Buffer.alloc(4);
   header.writeUInt32LE(json.length, 0);
