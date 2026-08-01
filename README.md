@@ -99,3 +99,7 @@ manual checklist to run through after changes there.
 - Console/network capture is top-frame only, not frame-aware
 - Text truncation is char-count-based, not byte-based (risk on CJK-heavy pages)
 - WebMCP integration deferred to a future version
+
+## License
+
+[MIT](LICENSE)
