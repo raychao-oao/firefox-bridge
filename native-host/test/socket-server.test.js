@@ -62,6 +62,52 @@ test('a client that sends the wrong token is disconnected', async () => {
   });
 });
 
+test('"request" carries the authenticated session as its third argument', async () => {
+  await withServer(async ({ server, socketPath, token }) => {
+    const seen = new Promise((resolve) => {
+      server.on('request', (msg, respond, session) => resolve(session));
+    });
+    const { socket, authAck } = await connectAndAuth(socketPath, token);
+    socket.write(encodeMessage({ type: 'navigate' }));
+    const session = await seen;
+    assert.equal(typeof session.id, 'string');
+    assert.equal(session.id, authAck.sessionId);
+    socket.destroy();
+  });
+});
+
+test('closing a socket emits "session-ended" with that session id', async () => {
+  await withServer(async ({ server, socketPath, token }) => {
+    const ended = new Promise((resolve) => server.on('session-ended', resolve));
+    const { socket, authAck } = await connectAndAuth(socketPath, token);
+    socket.destroy();
+    assert.equal(await ended, authAck.sessionId);
+  });
+});
+
+test('a malformed frame destroys only the offending connection, not the server', async () => {
+  await withServer(async ({ server, socketPath, token }) => {
+    const bad = await connectAndAuth(socketPath, token);
+    const closed = new Promise((resolve) => bad.socket.on('close', resolve));
+    // Length prefix beyond the socket cap: the decoder throws inside 'data'.
+    const bogus = Buffer.alloc(8);
+    bogus.writeUInt32LE(0xfffffff0, 0);
+    bad.socket.write(bogus);
+    await closed;
+
+    // Server still alive and serving new clients.
+    server.on('request', (msg, respond) => respond({ echoed: msg.payload }));
+    const good = await connectAndAuth(socketPath, token);
+    const reply = await new Promise((resolve) => {
+      const decoder = createDecoder((msg) => resolve(msg));
+      good.socket.on('data', (chunk) => decoder.push(chunk));
+      good.socket.write(encodeMessage({ payload: 'still-here' }));
+    });
+    assert.deepEqual(reply, { echoed: 'still-here' });
+    good.socket.destroy();
+  });
+});
+
 test('after auth, server emits "request" for subsequent messages and respond() writes framed JSON back', async () => {
   await withServer(async ({ server, socketPath, token }) => {
     server.on('request', (msg, respond) => {

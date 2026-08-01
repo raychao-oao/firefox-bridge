@@ -67,7 +67,7 @@ export function registerTools(server, bridgeClient) {
   server.registerTool(
     'get_console',
     {
-      description: 'Get console messages captured since console monitoring was started for this tab (start_console must be called first).',
+      description: 'Get console messages captured since console monitoring was started for this tab (start_console must be called first, otherwise this returns not_subscribed). Only the most recent 500 messages are retained.',
       inputSchema: { tabId: z.number() },
     },
     async ({ tabId }) => {
@@ -89,9 +89,21 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'start_network',
+    {
+      description: 'Start capturing webRequest-level network activity for a leased tab. Must be called before get_network — call it BEFORE navigating if you want to observe the page load.',
+      inputSchema: { tabId: z.number() },
+    },
+    async ({ tabId }) => {
+      const result = await bridgeClient.call({ type: 'start_network', tabId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'get_network',
     {
-      description: 'Get webRequest-level network activity observed for a leased tab (URL, method, status, headers, timing — not full response bodies).',
+      description: 'Get webRequest-level network activity observed for a leased tab since start_network was called (URL, method, status, timing — not full response bodies). Returns not_subscribed if start_network was never called. Only the most recent 500 requests are retained.',
       inputSchema: { tabId: z.number() },
     },
     async ({ tabId }) => {

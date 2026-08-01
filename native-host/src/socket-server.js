@@ -3,7 +3,9 @@ import { EventEmitter } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { encodeMessage, createDecoder } from './native-messaging.js';
+import { encodeMessage, createDecoder, MAX_SOCKET_MESSAGE_BYTES } from './native-messaging.js';
+
+const SOCKET_FRAME_OPTS = { maxBytes: MAX_SOCKET_MESSAGE_BYTES };
 
 export class SocketServer extends EventEmitter {
   constructor({ socketDir, sessionManager }) {
@@ -35,23 +37,53 @@ export class SocketServer extends EventEmitter {
     let authenticated = false;
     let session = null;
 
+    const respond = (result) => {
+      try {
+        socket.write(encodeMessage(result, SOCKET_FRAME_OPTS));
+      } catch (err) {
+        // Encoding failed (e.g. oversized frame). Report the failure to the
+        // client rather than throwing out of an async handler and crashing the
+        // singleton host.
+        process.stderr.write(`socket-server: failed to encode response: ${err.message}\n`);
+        try {
+          socket.write(encodeMessage({ ok: false, error: 'response_too_large', requestId: result?.requestId }, SOCKET_FRAME_OPTS));
+        } catch {
+          socket.destroy();
+        }
+      }
+    };
+
     const decoder = createDecoder((msg) => {
       if (!authenticated) {
         if (msg.type === 'auth' && msg.token === this.token) {
           authenticated = true;
           session = { id: this.sessionManager.createSession() };
-          socket.write(encodeMessage({ type: 'auth-ok', sessionId: session.id }));
+          respond({ type: 'auth-ok', sessionId: session.id });
         } else {
           socket.destroy();
         }
         return;
       }
-      this.emit('request', msg, (result) => socket.write(encodeMessage(result)), session);
-    });
+      this.emit('request', msg, respond, session);
+    }, SOCKET_FRAME_OPTS);
 
-    socket.on('data', (chunk) => decoder.push(chunk));
+    socket.on('data', (chunk) => {
+      // A malformed or oversized frame must only kill THIS connection — never
+      // the shared singleton process serving every other session.
+      try {
+        decoder.push(chunk);
+      } catch (err) {
+        process.stderr.write(`socket-server: dropping client after framing error: ${err.message}\n`);
+        socket.destroy();
+      }
+    });
     socket.on('close', () => {
-      if (session) this.sessionManager.destroySession(session.id);
+      if (session) {
+        this.sessionManager.destroySession(session.id);
+        // Let listeners (index.js) tell the extension to drop this session's
+        // leases/grants/buffers, which live extension-side, not host-side.
+        this.emit('session-ended', session.id);
+      }
     });
     socket.on('error', () => socket.destroy());
   }

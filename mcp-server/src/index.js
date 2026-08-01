@@ -1,17 +1,9 @@
 // repo/mcp-server/src/index.js
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import path from 'node:path';
-import os from 'node:os';
+import { bridgeDir } from '@firefox-bridge/native-host/src/bridge-dir.js';
 import { BridgeClient } from './bridge-client.js';
 import { registerTools } from './tools.js';
-
-function bridgeDir() {
-  const base = process.env.XDG_RUNTIME_DIR || os.homedir();
-  return process.env.XDG_RUNTIME_DIR
-    ? path.join(base, 'firefox-bridge')
-    : path.join(base, '.firefox-bridge');
-}
 
 async function main() {
   const bridgeClient = new BridgeClient({ socketDir: bridgeDir() });

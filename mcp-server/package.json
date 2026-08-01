@@ -5,10 +5,11 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@firefox-bridge/native-host": "*"
   }
 }

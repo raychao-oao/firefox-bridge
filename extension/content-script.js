@@ -26,7 +26,19 @@ browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'read_page') {
-    return Promise.resolve({ ok: true, text: document.body.innerText });
+    // Truncated so a huge page can't produce a response that blows past the
+    // 1 MiB native-messaging cap on the extension -> host hop.
+    const MAX_TEXT_CHARS = 500000;
+    const full = document.body ? document.body.innerText : '';
+    if (full.length > MAX_TEXT_CHARS) {
+      return Promise.resolve({
+        ok: true,
+        text: full.slice(0, MAX_TEXT_CHARS),
+        truncated: true,
+        totalLength: full.length,
+      });
+    }
+    return Promise.resolve({ ok: true, text: full, truncated: false });
   }
 
   return false; // not handled by this listener

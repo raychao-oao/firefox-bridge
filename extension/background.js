@@ -9,10 +9,20 @@ const policyGate = new PolicyGate({
   confirmationTimeoutMs: 60000,
 });
 
+// Console/network buffers are bounded ring buffers: an unbounded buffer on a
+// chatty page would eventually make get_console/get_network responses exceed
+// the 1 MiB native-messaging cap. Oldest entries are dropped first.
+const MAX_BUFFER_ENTRIES = 500;
+
+// Screenshot dataUrls routinely exceed the 1 MiB native-messaging cap, so they
+// are sent to the host in chunks. 700 KiB leaves ample room for the JSON
+// envelope inside the 1 MiB frame limit.
+const SCREENSHOT_CHUNK_CHARS = 700 * 1024;
+
 // Per-session tab lease bookkeeping. Reset entirely whenever the native
 // port reconnects (spec: "重連只恢復 transport，不恢復邏輯 session").
 let leaseOwner = new Map(); // tabId -> sessionId
-let onceGrants = new Set(); // urls granted "allow once"
+let onceGrants = new Map(); // sessionId -> Set<url> granted "allow once"
 let sessionGrants = new Map(); // sessionId -> Set<hostname>
 
 function connectToNativeHost() {
@@ -36,11 +46,35 @@ function scheduleReconnect() {
 }
 
 function onNativePortLost() {
-  // Transport-reconnect-does-not-restore-session: drop all lease/grant state.
+  // Transport-reconnect-does-not-restore-session: drop ALL per-session state,
+  // including captured page data. Leaving console/network buffers behind would
+  // let the next session to acquire a tab read the previous session's capture.
   leaseOwner = new Map();
-  onceGrants = new Set();
+  onceGrants = new Map();
   sessionGrants = new Map();
+  consoleBuffers.clear();
+  networkBuffers.clear();
   console.log('firefox-bridge: logical session state cleared on port loss');
+}
+
+// A single CLI session ended (its control socket closed). Unlike port loss,
+// only that session's state is dropped — other sessions keep their leases.
+function onSessionEnded(sessionId) {
+  if (sessionId == null) return;
+  for (const [tabId, owner] of [...leaseOwner]) {
+    if (owner === sessionId) releaseTabState(tabId);
+  }
+  onceGrants.delete(sessionId);
+  sessionGrants.delete(sessionId);
+  console.log(`firefox-bridge: cleared state for ended session ${sessionId}`);
+}
+
+// Dropping a lease also drops everything captured under it, so the next session
+// to acquire the tab starts with clean buffers.
+function releaseTabState(tabId) {
+  leaseOwner.delete(tabId);
+  consoleBuffers.delete(tabId);
+  networkBuffers.delete(tabId);
 }
 
 async function loadBlacklist() {
@@ -58,12 +92,18 @@ loadBlacklist();
 // before touching scripting.executeScript / tabs.captureTab / DOM reads /
 // webRequest subscriptions. See spec section "特權操作的中央 Policy Gate".
 async function policyCheck(url, sessionId) {
-  const decision = policyGate.checkUrl(url, { onceGrants, sessionGrants, sessionId });
+  const sessionOnceGrants = onceGrants.get(sessionId) || new Set();
+  const decision = policyGate.checkUrl(url, {
+    onceGrants: sessionOnceGrants,
+    sessionGrants,
+    sessionId,
+  });
   if (decision === 'allow') return { allowed: true };
 
   const userChoice = await requestUserConfirmation(url);
   if (userChoice === 'once') {
-    onceGrants.add(url);
+    if (!onceGrants.has(sessionId)) onceGrants.set(sessionId, new Set());
+    onceGrants.get(sessionId).add(url);
     return { allowed: true };
   }
   if (userChoice === 'session') {
@@ -133,13 +173,40 @@ function checkLease(sessionId, tabId) {
   return { ok: true };
 }
 
+// THE gate. Every privileged handler — anything that reads page content,
+// captures data, injects script, or subscribes to network events — funnels
+// through here. Lease first, then the blacklist policy on the URL being
+// touched (the tab's CURRENT url by default; callers that act on a different
+// url, e.g. navigate, pass it explicitly via `url`).
+async function privilegedGate(msg, { url } = {}) {
+  const lease = checkLease(msg.sessionId, msg.tabId);
+  if (!lease.ok) return lease;
+
+  let target = url;
+  if (target === undefined) {
+    try {
+      const tab = await browser.tabs.get(msg.tabId);
+      target = tab.url;
+    } catch (err) {
+      return { ok: false, error: `unknown_tab: ${err.message}` };
+    }
+  }
+
+  const policy = await policyCheck(target, msg.sessionId);
+  if (!policy.allowed) return { ok: false, error: policy.error };
+  return { ok: true };
+}
+
 async function handleNativeMessage(msg) {
   const respond = (result) => {
-    nativePort.postMessage({ ...result, requestId: msg.requestId });
+    if (nativePort) nativePort.postMessage({ ...result, requestId: msg.requestId });
   };
 
   try {
     switch (msg.type) {
+      case 'session_end':
+        // Host-initiated notification, not a request: no response expected.
+        return onSessionEnded(msg.sessionId);
       case 'acquire_tab':
         return respond(await handleAcquireTab(msg));
       case 'release_tab':
@@ -153,13 +220,16 @@ async function handleNativeMessage(msg) {
       case 'read_page':
         return respond(await forwardToContentScript(msg));
       case 'screenshot':
-        return respond(await handleScreenshot(msg));
+        // Responds itself (chunked); see handleScreenshot.
+        return await handleScreenshot(msg, respond);
       case 'start_console':
         return respond(await handleStartConsole(msg));
       case 'get_console':
-        return respond(handleGetConsole(msg));
+        return respond(await handleGetConsole(msg));
+      case 'start_network':
+        return respond(await handleStartNetwork(msg));
       case 'get_network':
-        return respond(handleGetNetwork(msg));
+        return respond(await handleGetNetwork(msg));
       default:
         return respond({ ok: false, error: `unknown message type: ${msg.type}` });
     }
@@ -172,11 +242,21 @@ async function handleAcquireTab(msg) {
   const sessionId = msg.sessionId;
   let tab;
   if (msg.tabId != null) {
-    const lease = checkLease(sessionId, msg.tabId);
-    if (lease.error === 'conflict') return { ok: false, error: 'conflict' };
+    const owner = leaseOwner.get(msg.tabId);
+    if (owner && owner !== sessionId) return { ok: false, error: 'conflict' };
     tab = await browser.tabs.get(msg.tabId);
+    // Leasing an ALREADY-OPEN tab exposes whatever is on it, so the blacklist
+    // applies before the lease is granted (no privilegedGate here: there is by
+    // definition no lease to check yet).
+    const policy = await policyCheck(tab.url, sessionId);
+    if (!policy.allowed) return { ok: false, error: policy.error };
   } else {
-    tab = await browser.tabs.create({ url: msg.url || 'about:blank' });
+    // Opening a NEW tab straight at a blacklisted URL must be gated too,
+    // otherwise acquire_tab is a way around navigate's check.
+    const url = msg.url || 'about:blank';
+    const policy = await policyCheck(url, sessionId);
+    if (!policy.allowed) return { ok: false, error: policy.error };
+    tab = await browser.tabs.create({ url });
   }
   if (leaseOwner.get(tab.id) && leaseOwner.get(tab.id) !== sessionId) {
     return { ok: false, error: 'conflict' };
@@ -186,18 +266,16 @@ async function handleAcquireTab(msg) {
 }
 
 function handleReleaseTab(msg) {
-  if (leaseOwner.get(msg.tabId) === msg.sessionId) {
-    leaseOwner.delete(msg.tabId);
-  }
+  const lease = checkLease(msg.sessionId, msg.tabId);
+  if (!lease.ok) return { ok: false, error: lease.error };
+  releaseTabState(msg.tabId);
   return { ok: true };
 }
 
 async function handleNavigate(msg) {
-  const lease = checkLease(msg.sessionId, msg.tabId);
-  if (!lease.ok) return { ok: false, error: lease.error };
-
-  const policy = await policyCheck(msg.url, msg.sessionId);
-  if (!policy.allowed) return { ok: false, error: policy.error };
+  // Gate on the DESTINATION url — that is what the operation exposes.
+  const gate = await privilegedGate(msg, { url: msg.url });
+  if (!gate.ok) return gate;
 
   await browser.tabs.update(msg.tabId, { url: msg.url });
   return { ok: true };
@@ -216,18 +294,33 @@ async function handleListTabs() {
   };
 }
 
-async function handleScreenshot(msg) {
-  const lease = checkLease(msg.sessionId, msg.tabId);
-  if (!lease.ok) return { ok: false, error: lease.error };
+async function handleScreenshot(msg, respond) {
+  const gate = await privilegedGate(msg);
+  if (!gate.ok) return respond(gate);
+
   const dataUrl = await browser.tabs.captureTab(msg.tabId, { format: 'png' });
-  // Returned to the native host as-is; index.js (Task 6/14) turns this into
-  // a payload-store handle before the MCP server ever sees raw bytes.
-  return { ok: true, dataUrl };
+
+  // Chunked transfer: a single message carrying a full retina PNG would blow
+  // past the 1 MiB native-messaging cap on THIS hop. Every chunk carries the
+  // original requestId so the host's `pending` map still routes it;
+  // native-host/src/index.js reassembles them before writing to PayloadStore.
+  const total = Math.max(1, Math.ceil(dataUrl.length / SCREENSHOT_CHUNK_CHARS));
+  for (let i = 0; i < total; i += 1) {
+    if (!nativePort) return; // port died mid-transfer; host will time the request out
+    nativePort.postMessage({
+      ok: true,
+      type: 'screenshot-chunk',
+      requestId: msg.requestId,
+      chunkIndex: i,
+      totalChunks: total,
+      data: dataUrl.slice(i * SCREENSHOT_CHUNK_CHARS, (i + 1) * SCREENSHOT_CHUNK_CHARS),
+    });
+  }
 }
 
 async function forwardToContentScript(msg) {
-  const lease = checkLease(msg.sessionId, msg.tabId);
-  if (!lease.ok) return { ok: false, error: lease.error };
+  const gate = await privilegedGate(msg);
+  if (!gate.ok) return gate;
   try {
     return await browser.tabs.sendMessage(msg.tabId, msg);
   } catch (err) {
@@ -237,16 +330,19 @@ async function forwardToContentScript(msg) {
 
 // Tab close invalidates any lease on it (spec: lease invalidation on tab close).
 browser.tabs.onRemoved.addListener((tabId) => {
-  leaseOwner.delete(tabId);
-  networkBuffers.delete(tabId);
-  consoleBuffers.delete(tabId);
+  releaseTabState(tabId);
 });
 
 const consoleBuffers = new Map(); // tabId -> array of {level, args, timestamp}
 
+function pushBounded(buffer, entry) {
+  buffer.push(entry);
+  while (buffer.length > MAX_BUFFER_ENTRIES) buffer.shift();
+}
+
 async function handleStartConsole(msg) {
-  const lease = checkLease(msg.sessionId, msg.tabId);
-  if (!lease.ok) return { ok: false, error: lease.error };
+  const gate = await privilegedGate(msg);
+  if (!gate.ok) return gate;
   consoleBuffers.set(msg.tabId, []);
   await browser.scripting.executeScript({
     target: { tabId: msg.tabId },
@@ -256,16 +352,20 @@ async function handleStartConsole(msg) {
   return { ok: true };
 }
 
-function handleGetConsole(msg) {
-  const lease = checkLease(msg.sessionId, msg.tabId);
-  if (!lease.ok) return { ok: false, error: lease.error };
-  return { ok: true, messages: consoleBuffers.get(msg.tabId) || [] };
+async function handleGetConsole(msg) {
+  // Gated like every other content-exposing operation: this hands back page
+  // content captured from the tab.
+  const gate = await privilegedGate(msg);
+  if (!gate.ok) return gate;
+  const buffer = consoleBuffers.get(msg.tabId);
+  if (!buffer) return { ok: false, error: 'not_subscribed' };
+  return { ok: true, messages: buffer };
 }
 
 browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg.type === 'console-message' && sender.tab) {
     const buf = consoleBuffers.get(sender.tab.id);
-    if (buf) buf.push({ level: msg.level, args: msg.args, timestamp: msg.timestamp });
+    if (buf) pushBounded(buf, { level: msg.level, args: msg.args, timestamp: msg.timestamp });
   }
 });
 
@@ -274,8 +374,9 @@ const networkBuffers = new Map(); // tabId -> array of request summaries
 browser.webRequest.onCompleted.addListener(
   (details) => {
     if (details.tabId < 0) return; // not associated with any tab (e.g. background requests) — never buffered
-    if (!networkBuffers.has(details.tabId)) return; // only buffer for tabs with an active subscription
-    networkBuffers.get(details.tabId).push({
+    const buf = networkBuffers.get(details.tabId);
+    if (!buf) return; // only buffer for tabs with an active subscription
+    pushBounded(buf, {
       url: details.url,
       method: details.method,
       statusCode: details.statusCode,
@@ -286,13 +387,21 @@ browser.webRequest.onCompleted.addListener(
   { urls: ['<all_urls>'] }
 );
 
-function handleGetNetwork(msg) {
-  const lease = checkLease(msg.sessionId, msg.tabId);
-  if (!lease.ok) return { ok: false, error: lease.error };
-  if (!networkBuffers.has(msg.tabId)) {
-    networkBuffers.set(msg.tabId, []); // first call for this tab starts buffering
-  }
-  return { ok: true, requests: networkBuffers.get(msg.tabId) };
+async function handleStartNetwork(msg) {
+  const gate = await privilegedGate(msg);
+  if (!gate.ok) return gate;
+  networkBuffers.set(msg.tabId, []);
+  return { ok: true };
+}
+
+async function handleGetNetwork(msg) {
+  const gate = await privilegedGate(msg);
+  if (!gate.ok) return gate;
+  const buffer = networkBuffers.get(msg.tabId);
+  // Buffering starts only at start_network, so a read before subscribing is an
+  // error rather than a silently-empty result that also loses page-load traffic.
+  if (!buffer) return { ok: false, error: 'not_subscribed' };
+  return { ok: true, requests: buffer };
 }
 
 connectToNativeHost();

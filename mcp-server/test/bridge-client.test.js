@@ -108,6 +108,34 @@ test('client emits session-reset when the server closes the connection after aut
   });
 });
 
+test('a pending call() resolves with request_timeout instead of hanging forever', async () => {
+  await withFakeServer(async ({ dir }) => {
+    const client = new BridgeClient({ socketDir: dir, requestTimeoutMs: 50 });
+    await client.connect();
+    const result = await client.call({ type: 'navigate', url: 'https://example.com/never-responds' });
+    assert.deepEqual(result, { ok: false, error: 'request_timeout' });
+    assert.equal(client.pending.size, 0); // no leak
+    client.close();
+  }, { respondToRequests: false });
+});
+
+test('a framing error on the socket is handled as a disconnect, not a crash', async () => {
+  await withFakeServer(async ({ dir, sockets }) => {
+    const client = new BridgeClient({ socketDir: dir });
+    await client.connect();
+
+    const pendingCall = client.call({ type: 'navigate', url: 'https://example.com/never-responds' });
+    // A length prefix larger than the socket cap: the decoder throws, and that
+    // throw must not escape the 'data' handler and kill the process.
+    const bogus = Buffer.alloc(8);
+    bogus.writeUInt32LE(0xfffffff0, 0);
+    sockets[0].write(bogus);
+
+    await assert.rejects(() => pendingCall, /bridge connection lost/);
+    client.close();
+  }, { respondToRequests: false });
+});
+
 test('a pending call() rejects when the server disconnects before responding', async () => {
   await withFakeServer(async ({ dir, sockets, requests }) => {
     const client = new BridgeClient({ socketDir: dir });
