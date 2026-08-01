@@ -45,12 +45,25 @@ export class BridgeClient extends EventEmitter {
     this.socket.on('close', () => this._handleDisconnect());
 
     await new Promise((resolve, reject) => {
+      let settled = false;
+      const onAuthFailureClose = () => {
+        if (settled) return;
+        settled = true;
+        reject(new Error('bridge authentication failed'));
+      };
       this.socket.once('connect', () => {
         this.socket.write(encode({ type: 'auth', token }));
       });
-      this.socket.once('error', reject);
+      this.socket.once('error', (err) => {
+        if (settled) return;
+        settled = true;
+        reject(err);
+      });
+      this.socket.once('close', onAuthFailureClose);
       const authWaiter = (msg) => {
         if (msg.type === 'auth-ok') {
+          settled = true;
+          this.socket.off('close', onAuthFailureClose);
           this.sessionId = msg.sessionId;
           resolve();
         }
