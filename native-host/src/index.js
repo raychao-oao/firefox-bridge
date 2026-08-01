@@ -1,5 +1,6 @@
 import path from 'node:path';
 import os from 'node:os';
+import { unlinkSync } from 'node:fs';
 import { createDecoder, encodeMessage } from './native-messaging.js';
 import { PayloadStore } from './payload-store.js';
 import { SessionManager } from './session-manager.js';
@@ -32,14 +33,18 @@ async function acquireSingletonLock(dir) {
 
 async function main() {
   const dir = bridgeDir();
-  const { mkdir, unlink } = await import('node:fs/promises');
+  const { mkdir } = await import('node:fs/promises');
   await mkdir(dir, { recursive: true, mode: 0o700 });
 
   const lock = await acquireSingletonLock(dir);
-  const cleanupLock = () => unlink(lock.lockPath).catch(() => {});
+  const cleanupLock = () => {
+    try {
+      unlinkSync(lock.lockPath);
+    } catch {
+      // already gone; ignore
+    }
+  };
   process.on('exit', cleanupLock);
-  process.on('SIGTERM', () => { cleanupLock(); process.exit(0); });
-  process.on('SIGINT', () => { cleanupLock(); process.exit(0); });
 
   const sessionManager = new SessionManager();
   const payloadStore = new PayloadStore(path.join(dir, 'payloads'));
@@ -75,7 +80,16 @@ async function main() {
     process.stdout.write(encodeMessage(msg));
   });
 
-  process.on('SIGTERM', () => { socketServer.stop(); payloadStore.invalidateAll(); });
+  const shutdown = async () => {
+    // Lock removal is synchronous and reliable even if the async cleanup
+    // below is slow, since process.exit() below will otherwise cut it off.
+    cleanupLock();
+    await socketServer.stop();
+    await payloadStore.invalidateAll();
+    process.exit(0);
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
 main().catch((err) => {
