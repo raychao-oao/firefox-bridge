@@ -189,12 +189,22 @@ async function privilegedGate(msg, { url } = {}) {
 
   let target = url;
   if (target === undefined) {
+    let tab;
     try {
-      const tab = await browser.tabs.get(msg.tabId);
-      target = tab.url;
+      tab = await browser.tabs.get(msg.tabId);
     } catch (err) {
       return { ok: false, error: `unknown_tab: ${err.message}` };
     }
+    // A discarded tab (Firefox unloaded its content -- most commonly a
+    // session-restore tab that hasn't been visited since restart) has no
+    // live document to inject into or read from. Fail with a distinct,
+    // actionable error instead of the generic content-script-injection
+    // failure this used to surface as; the caller should have the user
+    // switch to the tab (or navigate it) to force a real load, then retry.
+    if (tab.discarded) {
+      return { ok: false, error: 'tab_not_loaded' };
+    }
+    target = tab.url;
   }
 
   const policy = await policyCheck(target, msg.sessionId);
@@ -335,11 +345,13 @@ async function forwardToContentScript(msg) {
     // user's existing, already-logged-in tabs" (this project's whole point)
     // actually works on tabs opened before the extension started.
     try {
-      await browser.scripting.executeScript({
-        target: { tabId: msg.tabId },
-        files: ['content-script.js'],
-      });
+      // browser.tabs.executeScript (the classic MV2 API, uses the extension's
+      // existing host permissions directly) rather than browser.scripting --
+      // the latter threw an opaque "An unexpected error occurred" here with
+      // no further detail.
+      await browser.tabs.executeScript(msg.tabId, { file: 'content-script.js' });
     } catch (injectErr) {
+      console.error('firefox-bridge: content script injection failed', injectErr);
       return { ok: false, error: `content_script_inject_failed: ${injectErr.message}` };
     }
     try {
