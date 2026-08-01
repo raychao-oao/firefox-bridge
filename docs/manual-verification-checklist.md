@@ -50,6 +50,13 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `release_tab` on a tab this session does NOT own returns `conflict`/`not_leased` rather than silently succeeding
 - [ ] After `release_tab` + re-`acquire_tab` by a second session, `get_console`/`get_network` return `not_subscribed` — no leftover data from the first session
 
+## History search
+- [ ] `search_history` with a keyword that matches a page you've actually visited returns a result with correct `url`/`title`/`visitCount`/`lastVisitTime`
+- [ ] Visit a page more than a year ago (or manually adjust `HISTORY_SEARCH_RANGE_MS` down for testing, then revert) — confirm it does NOT show up in `search_history` results, verifying the 1-year internal window is actually applied and not just documented
+- [ ] Visit more than 30 distinct pages matching a common keyword — confirm `search_history` returns at most 30 results, not the API's default of 100
+- [ ] Visit a URL on a blacklisted hostname (from the options page blacklist), then `search_history` for it — confirm the result DOES appear (this is the deliberate no-filtering design, not a bug — this check exists to catch a future accidental regression toward filtering)
+- [ ] `search_history` does NOT trigger the blacklist confirmation popup, even when results include a blacklisted site — confirms it truly bypasses `privilegedGate()`
+
 ## Policy gate / blacklist
 - [ ] Add a hostname via the options page; `navigate` to it triggers a confirmation popup and the target tab does NOT navigate before you respond
 - [ ] Choosing "Allow once" navigates, and the next `navigate` call to that exact URL doesn't re-prompt, but a *different* URL on the same blacklisted host does

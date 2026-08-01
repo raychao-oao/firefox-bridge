@@ -260,6 +260,8 @@ async function handleNativeMessage(msg) {
         return respond(await handleNavigate(msg));
       case 'list_tabs':
         return respond(await handleListTabs());
+      case 'search_history':
+        return respond(await handleSearchHistory(msg));
       case 'click':
       case 'type':
       case 'read_page':
@@ -338,6 +340,26 @@ async function handleListTabs() {
       url: t.url,
       title: t.title,
       leasedBy: leaseOwner.get(t.id) || null,
+    })),
+  };
+}
+
+const HISTORY_SEARCH_MAX_RESULTS = 30;
+const HISTORY_SEARCH_RANGE_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
+
+async function handleSearchHistory(msg) {
+  const items = await browser.history.search({
+    text: msg.query,
+    startTime: Date.now() - HISTORY_SEARCH_RANGE_MS,
+    maxResults: HISTORY_SEARCH_MAX_RESULTS,
+  });
+  return {
+    ok: true,
+    results: items.map((item) => ({
+      url: item.url,
+      title: item.title,
+      visitCount: item.visitCount,
+      lastVisitTime: item.lastVisitTime,
     })),
   };
 }

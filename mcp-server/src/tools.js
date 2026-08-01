@@ -176,6 +176,19 @@ export function registerTools(server, bridgeClient) {
       return toolResult(result);
     }
   );
+
+  server.registerTool(
+    'search_history',
+    {
+      description:
+        "Search the user's Firefox browsing history by keyword (matches against page URL and title). Searches the last year and returns at most 30 results (url, title, visitCount, lastVisitTime per entry), most relevant/recent first. This does NOT filter out blacklisted sites from results — history search is read-only and unrelated to the tab-based policy gate that other tools use.",
+      inputSchema: { query: z.string() },
+    },
+    async ({ query }) => {
+      const result = await bridgeClient.call({ type: 'search_history', query });
+      return toolResult(result);
+    }
+  );
 }
 
 function toolResult(result) {

@@ -18,6 +18,7 @@
     "activeTab",
     "webNavigation",
     "webRequest",
+    "history",
     "storage",
     "scripting",
     "<all_urls>"
