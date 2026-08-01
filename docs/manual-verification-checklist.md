@@ -17,6 +17,7 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 
 ## MCP server + tools (run mcp-server manually: `cd repo/mcp-server && node src/index.js`, drive it with any MCP-capable client or a small manual JSON-RPC script over stdio)
 - [ ] `acquire_tab` with a `url` opens a new tab and returns a `tabId`
+- [ ] `list_tabs` returns all open tabs (id, url, title) including lease status, matching actual browser state (open a couple of tabs manually, acquire a lease on one via another tool call, and confirm list_tabs reflects both the full tab list and the correct leasedBy status)
 - [ ] `navigate` to a normal (non-blacklisted) URL succeeds
 - [ ] `click` on a known selector (test against a simple local HTML page) actually clicks
 - [ ] `type` on an input field sets its value and fires `input`/`change` (verify via a page that echoes input state)

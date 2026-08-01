@@ -1,5 +1,5 @@
 // repo/scripts/install-native-manifest.js
-import { writeFile, mkdir, chmod } from 'node:fs/promises';
+import { writeFile, mkdir } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +32,6 @@ async function writeLauncherScript(manifestDir) {
   const launcherPath = path.join(manifestDir, '..', 'firefox-bridge-launch.sh');
   const script = `#!/bin/sh\nexec node "${NATIVE_HOST_ENTRY}"\n`;
   await writeFile(launcherPath, script, { mode: 0o755 });
-  await chmod(launcherPath, 0o755);
   return launcherPath;
 }
 
