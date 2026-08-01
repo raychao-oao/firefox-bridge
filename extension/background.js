@@ -4,20 +4,26 @@
 let nativePort = null;
 let reconnectTimer = null;
 
+const policyGate = new PolicyGate({
+  blacklist: [], // populated from browser.storage.local by loadBlacklist(), see options/options.js (Task 16)
+  confirmationTimeoutMs: 60000,
+});
+
+// Per-session tab lease bookkeeping. Reset entirely whenever the native
+// port reconnects (spec: "重連只恢復 transport，不恢復邏輯 session").
+let leaseOwner = new Map(); // tabId -> sessionId
+let onceGrants = new Set(); // urls granted "allow once"
+let sessionGrants = new Map(); // sessionId -> Set<hostname>
+
 function connectToNativeHost() {
   nativePort = browser.runtime.connectNative('firefox_bridge_native_host');
-
-  nativePort.onMessage.addListener((msg) => {
-    handleNativeMessage(msg);
-  });
-
+  nativePort.onMessage.addListener((msg) => handleNativeMessage(msg));
   nativePort.onDisconnect.addListener(() => {
     console.warn('firefox-bridge: native port disconnected', browser.runtime.lastError);
     nativePort = null;
     onNativePortLost();
     scheduleReconnect();
   });
-
   console.log('firefox-bridge: native port connected');
 }
 
@@ -29,15 +35,140 @@ function scheduleReconnect() {
   }, 1000);
 }
 
-// Overridden in Task 11 to actually clear session/lease state;
-// declared here so the lifecycle wiring is complete on its own.
 function onNativePortLost() {
-  console.log('firefox-bridge: native port lost, logical session state must be reset (see Task 11)');
+  // Transport-reconnect-does-not-restore-session: drop all lease/grant state.
+  leaseOwner = new Map();
+  onceGrants = new Set();
+  sessionGrants = new Map();
+  console.log('firefox-bridge: logical session state cleared on port loss');
 }
 
-// Overridden in Task 11 to dispatch to the policy gate + tab lease + tool handlers.
-function handleNativeMessage(msg) {
-  console.log('firefox-bridge: received native message', msg);
+async function loadBlacklist() {
+  const stored = await browser.storage.local.get('blacklist');
+  policyGate.blacklist = stored.blacklist || [];
 }
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.blacklist) {
+    policyGate.blacklist = changes.blacklist.newValue || [];
+  }
+});
+loadBlacklist();
+
+// Central policy gate — every privileged operation must go through this
+// before touching scripting.executeScript / tabs.captureTab / DOM reads /
+// webRequest subscriptions. See spec section "特權操作的中央 Policy Gate".
+async function policyCheck(url, sessionId) {
+  const decision = policyGate.checkUrl(url, { onceGrants, sessionGrants, sessionId });
+  if (decision === 'allow') return { allowed: true };
+
+  const userChoice = await requestUserConfirmation(url);
+  if (userChoice === 'once') {
+    onceGrants.add(url);
+    return { allowed: true };
+  }
+  if (userChoice === 'session') {
+    const hostname = new URL(url).hostname;
+    if (!sessionGrants.has(sessionId)) sessionGrants.set(sessionId, new Set());
+    sessionGrants.get(sessionId).add(hostname);
+    return { allowed: true };
+  }
+  return { allowed: false, error: 'blacklisted_denied' };
+}
+
+function requestUserConfirmation(url) {
+  // Implemented in Task 16 (popup UI). Returns 'once' | 'session' | 'denied',
+  // and resolves 'denied' automatically after the policy gate's configured
+  // timeout if the user never responds (no indefinite CLI-side hang).
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve('denied'), policyGate.confirmationTimeoutMs);
+    openConfirmationPopup(url, (choice) => {
+      clearTimeout(timeout);
+      resolve(choice);
+    });
+  });
+}
+
+function checkLease(sessionId, tabId) {
+  const owner = leaseOwner.get(tabId);
+  if (!owner) return { ok: false, error: 'not_leased' };
+  if (owner !== sessionId) return { ok: false, error: 'conflict' };
+  return { ok: true };
+}
+
+async function handleNativeMessage(msg) {
+  const respond = (result) => {
+    nativePort.postMessage({ ...result, requestId: msg.requestId });
+  };
+
+  try {
+    switch (msg.type) {
+      case 'acquire_tab':
+        return respond(await handleAcquireTab(msg));
+      case 'release_tab':
+        return respond(handleReleaseTab(msg));
+      case 'navigate':
+        return respond(await handleNavigate(msg));
+      case 'list_tabs':
+        return respond(await handleListTabs());
+      default:
+        return respond({ ok: false, error: `unknown message type: ${msg.type}` });
+    }
+  } catch (err) {
+    respond({ ok: false, error: err.message });
+  }
+}
+
+async function handleAcquireTab(msg) {
+  const sessionId = msg.sessionId;
+  let tab;
+  if (msg.tabId != null) {
+    const lease = checkLease(sessionId, msg.tabId);
+    if (lease.error === 'conflict') return { ok: false, error: 'conflict' };
+    tab = await browser.tabs.get(msg.tabId);
+  } else {
+    tab = await browser.tabs.create({ url: msg.url || 'about:blank' });
+  }
+  if (leaseOwner.get(tab.id) && leaseOwner.get(tab.id) !== sessionId) {
+    return { ok: false, error: 'conflict' };
+  }
+  leaseOwner.set(tab.id, sessionId);
+  return { ok: true, tabId: tab.id, url: tab.url };
+}
+
+function handleReleaseTab(msg) {
+  if (leaseOwner.get(msg.tabId) === msg.sessionId) {
+    leaseOwner.delete(msg.tabId);
+  }
+  return { ok: true };
+}
+
+async function handleNavigate(msg) {
+  const lease = checkLease(msg.sessionId, msg.tabId);
+  if (!lease.ok) return { ok: false, error: lease.error };
+
+  const policy = await policyCheck(msg.url, msg.sessionId);
+  if (!policy.allowed) return { ok: false, error: policy.error };
+
+  await browser.tabs.update(msg.tabId, { url: msg.url });
+  return { ok: true };
+}
+
+async function handleListTabs() {
+  const tabs = await browser.tabs.query({});
+  return {
+    ok: true,
+    tabs: tabs.map((t) => ({
+      id: t.id,
+      url: t.url,
+      title: t.title,
+      leasedBy: leaseOwner.get(t.id) || null,
+    })),
+  };
+}
+
+// Tab close invalidates any lease on it (spec: lease invalidation on tab close).
+browser.tabs.onRemoved.addListener((tabId) => {
+  leaseOwner.delete(tabId);
+});
 
 connectToNativeHost();
