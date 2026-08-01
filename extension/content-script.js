@@ -70,7 +70,21 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       // even on a link-heavy page; excess candidates are dropped, not
       // paginated -- MVP scope, revisit if this proves too small in practice.
       const MAX_ELEMENTS = 300;
-      const candidates = Array.from(document.querySelectorAll(CANDIDATE_SELECTOR));
+      const semanticCandidates = document.querySelectorAll(CANDIDATE_SELECTOR);
+      // Some UIs (this Netgear router admin panel included) bind clicks via
+      // JS to plain li/span/div with no semantic tag, role, or onclick
+      // attribute -- invisible to the selector above. `cursor: pointer` is
+      // an imperfect but effective heuristic for "a human would click this".
+      // Capped separately so a pathological page can't make this scan itself
+      // the bottleneck.
+      const HEURISTIC_SCAN_CAP = 3000;
+      const heuristicPool = document.querySelectorAll('li, span, div');
+      const heuristicCandidates = [];
+      for (let i = 0; i < heuristicPool.length && i < HEURISTIC_SCAN_CAP; i += 1) {
+        const el = heuristicPool[i];
+        if (getComputedStyle(el).cursor === 'pointer') heuristicCandidates.push(el);
+      }
+      const candidates = [...new Set([...semanticCandidates, ...heuristicCandidates])];
       const elements = [];
       for (const el of candidates) {
         if (elements.length >= MAX_ELEMENTS) break;
