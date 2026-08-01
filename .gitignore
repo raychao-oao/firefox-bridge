@@ -1,0 +1,7 @@
+CLAUDE.md
+CLAUDE.local.md
+docs/ai_collaboration/
+node_modules/
+dist/
+.env
+*.log
