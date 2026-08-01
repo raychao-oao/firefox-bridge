@@ -1,6 +1,6 @@
 {
   "manifest_version": 2,
-  "name": "firefox-bridge",
+  "name": "MCP Browser Bridge",
   "version": "0.1.0",
   "description": "Lets MCP-capable CLIs (Claude Code, Codex, etc.) operate your existing Firefox tabs.",
   "browser_specific_settings": {
