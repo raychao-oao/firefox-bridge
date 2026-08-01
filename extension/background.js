@@ -239,6 +239,7 @@ async function forwardToContentScript(msg) {
 browser.tabs.onRemoved.addListener((tabId) => {
   leaseOwner.delete(tabId);
   networkBuffers.delete(tabId);
+  consoleBuffers.delete(tabId);
 });
 
 const consoleBuffers = new Map(); // tabId -> array of {level, args, timestamp}
