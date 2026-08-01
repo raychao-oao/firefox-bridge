@@ -80,31 +80,48 @@ function requestUserConfirmation(url) {
   // and resolves 'denied' automatically after the policy gate's configured
   // timeout if the user never responds (no indefinite CLI-side hang).
   return new Promise((resolve) => {
-    const timeout = setTimeout(() => resolve('denied'), policyGate.confirmationTimeoutMs);
-    openConfirmationPopup(url, (choice) => {
+    let requestId;
+    const timeout = setTimeout(() => {
+      // User never responded (ignored the popup or closed it via the
+      // window's own close button). Clean up the pending entry and the
+      // orphaned popup window so they don't leak.
+      const pending = pendingConfirmations.get(requestId);
+      if (pending) {
+        pendingConfirmations.delete(requestId);
+        if (pending.windowId != null) {
+          browser.windows.remove(pending.windowId).catch(() => {});
+        }
+      }
+      resolve('denied');
+    }, policyGate.confirmationTimeoutMs);
+    requestId = openConfirmationPopup(url, (choice) => {
       clearTimeout(timeout);
       resolve(choice);
     });
   });
 }
 
-const pendingConfirmations = new Map(); // requestId -> callback
+const pendingConfirmations = new Map(); // requestId -> { callback, windowId }
 
 function openConfirmationPopup(url, callback) {
   const requestId = crypto.randomUUID();
-  pendingConfirmations.set(requestId, callback);
+  pendingConfirmations.set(requestId, { callback, windowId: null });
   const popupUrl = browser.runtime.getURL(
     `popup-confirm/confirm.html?url=${encodeURIComponent(url)}&requestId=${requestId}`
   );
-  browser.windows.create({ url: popupUrl, type: 'popup', width: 360, height: 200 });
+  browser.windows.create({ url: popupUrl, type: 'popup', width: 360, height: 200 }).then((win) => {
+    const pending = pendingConfirmations.get(requestId);
+    if (pending) pending.windowId = win.id;
+  });
+  return requestId;
 }
 
 browser.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'confirmation-response') {
-    const callback = pendingConfirmations.get(msg.requestId);
-    if (callback) {
+    const pending = pendingConfirmations.get(msg.requestId);
+    if (pending) {
       pendingConfirmations.delete(msg.requestId);
-      callback(msg.choice);
+      pending.callback(msg.choice);
     }
   }
 });
