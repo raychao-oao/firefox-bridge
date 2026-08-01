@@ -4,6 +4,11 @@
 let nativePort = null;
 let reconnectTimer = null;
 
+// Timeout ordering constraint (must hold across all three files or a slow-but-
+// legitimate user response races the CLI-facing timeout and produces an
+// orphaned reply — see native-host/src/index.js's REQUEST_TIMEOUT_MS comment):
+//   confirmationTimeoutMs (here) < native-host REQUEST_TIMEOUT_MS < mcp-server
+//   bridge-client REQUEST_TIMEOUT_MS
 const policyGate = new PolicyGate({
   blacklist: [], // populated from browser.storage.local by loadBlacklist(), see options/options.js (Task 16)
   confirmationTimeoutMs: 60000,

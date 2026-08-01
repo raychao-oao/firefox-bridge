@@ -14,10 +14,19 @@ import {
 
 const SOCKET_FRAME_OPTS = { maxBytes: MAX_SOCKET_MESSAGE_BYTES };
 
-// Must match native-host/src/index.js's REQUEST_TIMEOUT_MS. The host applies
-// its own timeout to the Firefox hop; this one additionally covers the host
-// itself going away mid-request.
-const REQUEST_TIMEOUT_MS = 30_000;
+// Must stay >= native-host/src/index.js's REQUEST_TIMEOUT_MS (currently
+// 90_000ms), with a real margin on top. The host applies its own timeout to
+// the Firefox hop and can legitimately take up to that long to resolve (e.g.
+// waiting on a blacklist confirmation popup, or refreshing its timer across a
+// multi-chunk screenshot transfer); this client-side timeout additionally
+// covers the host itself going away mid-request, but must never fire before
+// a legitimate host response would arrive. Ordering constraint (see also
+// extension/background.js's confirmationTimeoutMs comment):
+//   confirmationTimeoutMs < native-host REQUEST_TIMEOUT_MS < this value.
+// Simplest robust rule: keep this = host timeout + margin (5-10s+), rather
+// than trying to mirror the host's per-chunk refresh() here.
+const HOST_REQUEST_TIMEOUT_MS = 90_000;
+const REQUEST_TIMEOUT_MS = HOST_REQUEST_TIMEOUT_MS + 10_000;
 
 export class BridgeClient extends EventEmitter {
   constructor({ socketDir, requestTimeoutMs = REQUEST_TIMEOUT_MS }) {

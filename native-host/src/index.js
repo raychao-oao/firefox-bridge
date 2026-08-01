@@ -9,7 +9,18 @@ import { SocketServer } from './socket-server.js';
 // A request forwarded to Firefox that never gets a reply (crashed background
 // page, dropped native port) must not hang the CLI forever or leak a `pending`
 // entry. Kept in sync with mcp-server/src/bridge-client.js.
-const REQUEST_TIMEOUT_MS = 30_000;
+//
+// Timeout ordering constraint (see also extension/background.js's
+// confirmationTimeoutMs comment): this value MUST stay comfortably larger
+// than the extension's confirmationTimeoutMs (currently 60_000ms). Gated
+// operations (blacklist confirmation popup) can legitimately take up to that
+// long to resolve; if this timeout fires first, the CLI is told
+// 'request_timeout' while the extension is still waiting on the user, and
+// once the user responds the extension proceeds anyway with nothing left
+// listening for the real reply (the `pending` entry was already deleted).
+// Keep this >= confirmationTimeoutMs + real margin (not just +1ms), and keep
+// mcp-server/src/bridge-client.js's REQUEST_TIMEOUT_MS >= this value.
+const REQUEST_TIMEOUT_MS = 90_000;
 
 async function acquireSingletonLock(dir) {
   const { open } = await import('node:fs/promises');
