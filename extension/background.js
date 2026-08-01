@@ -158,6 +158,8 @@ async function handleNativeMessage(msg) {
         return respond(await handleStartConsole(msg));
       case 'get_console':
         return respond(handleGetConsole(msg));
+      case 'get_network':
+        return respond(handleGetNetwork(msg));
       default:
         return respond({ ok: false, error: `unknown message type: ${msg.type}` });
     }
@@ -236,6 +238,7 @@ async function forwardToContentScript(msg) {
 // Tab close invalidates any lease on it (spec: lease invalidation on tab close).
 browser.tabs.onRemoved.addListener((tabId) => {
   leaseOwner.delete(tabId);
+  networkBuffers.delete(tabId);
 });
 
 const consoleBuffers = new Map(); // tabId -> array of {level, args, timestamp}
@@ -264,5 +267,31 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     if (buf) buf.push({ level: msg.level, args: msg.args, timestamp: msg.timestamp });
   }
 });
+
+const networkBuffers = new Map(); // tabId -> array of request summaries
+
+browser.webRequest.onCompleted.addListener(
+  (details) => {
+    if (details.tabId < 0) return; // not associated with any tab (e.g. background requests) — never buffered
+    if (!networkBuffers.has(details.tabId)) return; // only buffer for tabs with an active subscription
+    networkBuffers.get(details.tabId).push({
+      url: details.url,
+      method: details.method,
+      statusCode: details.statusCode,
+      type: details.type,
+      timeStamp: details.timeStamp,
+    });
+  },
+  { urls: ['<all_urls>'] }
+);
+
+function handleGetNetwork(msg) {
+  const lease = checkLease(msg.sessionId, msg.tabId);
+  if (!lease.ok) return { ok: false, error: lease.error };
+  if (!networkBuffers.has(msg.tabId)) {
+    networkBuffers.set(msg.tabId, []); // first call for this tab starts buffering
+  }
+  return { ok: true, requests: networkBuffers.get(msg.tabId) };
+}
 
 connectToNativeHost();
