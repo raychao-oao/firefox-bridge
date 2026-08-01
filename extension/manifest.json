@@ -16,6 +16,7 @@
     "webNavigation",
     "webRequest",
     "storage",
+    "scripting",
     "<all_urls>"
   ],
   "background": {
