@@ -183,7 +183,13 @@ function checkLease(sessionId, tabId) {
 // through here. Lease first, then the blacklist policy on the URL being
 // touched (the tab's CURRENT url by default; callers that act on a different
 // url, e.g. navigate, pass it explicitly via `url`).
-async function privilegedGate(msg, { url } = {}) {
+//
+// `frameId` scopes the URL lookup to a specific frame (0 = top frame, the
+// default). This matters because a page's iframes are separate policy
+// targets: an allowed top-level page must not become a back door into a
+// blacklisted embedded frame, so each frame is gated on ITS OWN url, not the
+// tab's.
+async function privilegedGate(msg, { url, frameId = 0 } = {}) {
   const lease = checkLease(msg.sessionId, msg.tabId);
   if (!lease.ok) return lease;
 
@@ -204,7 +210,19 @@ async function privilegedGate(msg, { url } = {}) {
     if (tab.discarded) {
       return { ok: false, error: 'tab_not_loaded' };
     }
-    target = tab.url;
+    if (frameId === 0) {
+      target = tab.url;
+    } else {
+      let frames;
+      try {
+        frames = await browser.webNavigation.getAllFrames({ tabId: msg.tabId });
+      } catch (err) {
+        return { ok: false, error: `unknown_tab: ${err.message}` };
+      }
+      const frame = frames && frames.find((f) => f.frameId === frameId);
+      if (!frame) return { ok: false, error: `unknown_frame: ${frameId}` };
+      target = frame.url;
+    }
   }
 
   const policy = await policyCheck(target, msg.sessionId);
@@ -235,6 +253,8 @@ async function handleNativeMessage(msg) {
       case 'read_page':
       case 'list_elements':
         return respond(await forwardToContentScript(msg));
+      case 'list_frames':
+        return respond(await handleListFrames(msg));
       case 'screenshot':
         // Responds itself (chunked); see handleScreenshot.
         return await handleScreenshot(msg, respond);
@@ -334,33 +354,118 @@ async function handleScreenshot(msg, respond) {
   }
 }
 
-async function forwardToContentScript(msg) {
-  const gate = await privilegedGate(msg);
+async function handleListFrames(msg) {
+  // Discovery-only: gated on the top frame, same as any other operation that
+  // doesn't target a specific sub-frame yet. The frames THEMSELVES aren't
+  // read here, just enumerated (id/parent/url), so this doesn't need a
+  // per-frame policy check the way forwardToContentScript's aggregate path
+  // does.
+  const gate = await privilegedGate(msg, { frameId: 0 });
   if (!gate.ok) return gate;
+  let frames;
   try {
-    return await browser.tabs.sendMessage(msg.tabId, msg);
+    frames = await browser.webNavigation.getAllFrames({ tabId: msg.tabId });
   } catch (err) {
-    // The tab may predate this extension being loaded/reloaded -- manifest.json's
-    // content_scripts only auto-inject on new navigations, not into already-open
-    // tabs. Inject on demand and retry once before giving up, so "operate the
-    // user's existing, already-logged-in tabs" (this project's whole point)
-    // actually works on tabs opened before the extension started.
+    return { ok: false, error: `unknown_tab: ${err.message}` };
+  }
+  return {
+    ok: true,
+    frames: frames.map((f) => ({ frameId: f.frameId, parentFrameId: f.parentFrameId, url: f.url })),
+  };
+}
+
+// Sends to exactly one frame, never a bare tabId-only broadcast: with
+// all_frames:true, more than one frame can have a listener, and Firefox
+// resolves an unscoped tabs.sendMessage to only one of the (arbitrary)
+// responses -- see https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/sendMessage.
+async function sendToFrame(tabId, frameId, msg) {
+  try {
+    return await browser.tabs.sendMessage(tabId, msg, { frameId });
+  } catch (err) {
+    // This frame may predate the extension being loaded/reloaded --
+    // manifest.json's content_scripts only auto-inject on new navigations,
+    // not into already-open tabs/frames. Inject on demand and retry once
+    // before giving up, so "operate the user's existing, already-logged-in
+    // tabs" (this project's whole point) actually works on tabs opened
+    // before the extension started.
     try {
       // browser.tabs.executeScript (the classic MV2 API, uses the extension's
       // existing host permissions directly) rather than browser.scripting --
       // the latter threw an opaque "An unexpected error occurred" here with
-      // no further detail.
-      await browser.tabs.executeScript(msg.tabId, { file: 'content-script.js' });
+      // no further detail. frameId here targets exactly this frame; never
+      // pass allFrames here, that would reintroduce the same
+      // which-response-wins ambiguity this function exists to avoid.
+      await browser.tabs.executeScript(tabId, { file: 'content-script.js', frameId });
     } catch (injectErr) {
       console.error('firefox-bridge: content script injection failed', injectErr);
       return { ok: false, error: `content_script_inject_failed: ${injectErr.message}` };
     }
     try {
-      return await browser.tabs.sendMessage(msg.tabId, msg);
+      return await browser.tabs.sendMessage(tabId, msg, { frameId });
     } catch (retryErr) {
       return { ok: false, error: `content_script_unreachable: ${retryErr.message}` };
     }
   }
+}
+
+async function forwardToContentScript(msg) {
+  // click/type always target one specific frame (default top frame) --
+  // there's no meaningful "click in every frame at once".
+  if (msg.type === 'click' || msg.type === 'type') {
+    const frameId = msg.frameId ?? 0;
+    const gate = await privilegedGate(msg, { frameId });
+    if (!gate.ok) return gate;
+    return sendToFrame(msg.tabId, frameId, msg);
+  }
+
+  // read_page / list_elements with an explicit frameId: single-frame, same
+  // shape as before this session's iframe work.
+  if (msg.frameId != null) {
+    const gate = await privilegedGate(msg, { frameId: msg.frameId });
+    if (!gate.ok) return gate;
+    const result = await sendToFrame(msg.tabId, msg.frameId, msg);
+    if (result.ok && msg.type === 'list_elements' && Array.isArray(result.elements)) {
+      result.elements = result.elements.map((el) => ({ ...el, frameId: msg.frameId }));
+    }
+    return result;
+  }
+
+  // read_page / list_elements with no frameId: enumerate every frame and
+  // aggregate, grouped by frame -- NOT a flat merged list, so a caller can
+  // tell the router UI's real content frame apart from an unrelated ad
+  // iframe instead of everything being interleaved. Each frame is gated on
+  // its own url: an allowed top-level page must not become a path to read a
+  // blacklisted embedded frame.
+  const topGate = await privilegedGate(msg, { frameId: 0 });
+  if (!topGate.ok) return topGate;
+
+  let frameList;
+  try {
+    frameList = await browser.webNavigation.getAllFrames({ tabId: msg.tabId });
+  } catch (err) {
+    return { ok: false, error: `unknown_tab: ${err.message}` };
+  }
+
+  const frames = [];
+  const frameErrors = [];
+  for (const frame of frameList) {
+    const frameGate = frame.frameId === 0 ? topGate : await privilegedGate(msg, { frameId: frame.frameId });
+    if (!frameGate.ok) {
+      frameErrors.push({ frameId: frame.frameId, url: frame.url, error: frameGate.error });
+      continue;
+    }
+    const result = await sendToFrame(msg.tabId, frame.frameId, msg);
+    if (!result.ok) {
+      frameErrors.push({ frameId: frame.frameId, url: frame.url, error: result.error });
+      continue;
+    }
+    if (msg.type === 'list_elements' && Array.isArray(result.elements)) {
+      result.elements = result.elements.map((el) => ({ ...el, frameId: frame.frameId }));
+    }
+    frames.push({ frameId: frame.frameId, parentFrameId: frame.parentFrameId, url: frame.url, ...result });
+  }
+
+  return { ok: true, frames, frameErrors };
 }
 
 // Tab close invalidates any lease on it (spec: lease invalidation on tab close).

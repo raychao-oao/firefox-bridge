@@ -17,11 +17,12 @@ export function registerTools(server, bridgeClient) {
   server.registerTool(
     'click',
     {
-      description: 'Click an element in a leased tab, identified by a CSS selector.',
-      inputSchema: { tabId: z.number(), selector: z.string() },
+      description:
+        'Click an element in a leased tab, identified by a CSS selector. Pass `frameId` to target a specific frame (get it from `list_frames` or a `list_elements` entry) — defaults to the top frame (0), which does NOT reach into iframes.',
+      inputSchema: { tabId: z.number(), selector: z.string(), frameId: z.number().optional() },
     },
-    async ({ tabId, selector }) => {
-      const result = await bridgeClient.call({ type: 'click', tabId, selector });
+    async ({ tabId, selector, frameId }) => {
+      const result = await bridgeClient.call({ type: 'click', tabId, selector, frameId });
       return toolResult(result);
     }
   );
@@ -29,11 +30,12 @@ export function registerTools(server, bridgeClient) {
   server.registerTool(
     'type',
     {
-      description: 'Type text into an element in a leased tab, identified by a CSS selector.',
-      inputSchema: { tabId: z.number(), selector: z.string(), text: z.string() },
+      description:
+        'Type text into an element in a leased tab, identified by a CSS selector. Pass `frameId` to target a specific frame (get it from `list_frames` or a `list_elements` entry) — defaults to the top frame (0), which does NOT reach into iframes.',
+      inputSchema: { tabId: z.number(), selector: z.string(), text: z.string(), frameId: z.number().optional() },
     },
-    async ({ tabId, selector, text }) => {
-      const result = await bridgeClient.call({ type: 'type', tabId, selector, text });
+    async ({ tabId, selector, text, frameId }) => {
+      const result = await bridgeClient.call({ type: 'type', tabId, selector, text, frameId });
       return toolResult(result);
     }
   );
@@ -41,11 +43,12 @@ export function registerTools(server, bridgeClient) {
   server.registerTool(
     'read_page',
     {
-      description: "Read the visible text content of a leased tab's page.",
-      inputSchema: { tabId: z.number() },
+      description:
+        "Read the visible text content of a leased tab's page. Pass `frameId` (from `list_frames`) to read one specific frame. Omit it to read every frame at once — the response is then `{ok, frames: [{frameId, parentFrameId, url, text, ...}], frameErrors: [...]}` grouped per frame, NOT a single merged string, since a page's iframes are separate documents (e.g. a settings panel that renders inside an iframe won't show up unless you read its frame).",
+      inputSchema: { tabId: z.number(), frameId: z.number().optional() },
     },
-    async ({ tabId }) => {
-      const result = await bridgeClient.call({ type: 'read_page', tabId });
+    async ({ tabId, frameId }) => {
+      const result = await bridgeClient.call({ type: 'read_page', tabId, frameId });
       return toolResult(result);
     }
   );
@@ -54,11 +57,24 @@ export function registerTools(server, bridgeClient) {
     'list_elements',
     {
       description:
-        "List interactive elements (links, buttons, inputs, selects, textareas, ARIA button/link/menuitem/tab roles) currently visible in a leased tab. Each entry includes a `selector` you can pass directly to `click`/`type` — it targets exactly the inspected element, no guessing required. Capped at 300 elements per call; `truncated: true` means some were dropped.",
+        "List interactive elements (links, buttons, inputs, selects, textareas, ARIA button/link/menuitem/tab roles) currently visible in a leased tab. Each entry includes a `selector` and `frameId` you can pass directly to `click`/`type` — guaranteed to target exactly the inspected element, no guessing required. Capped at 300 elements per frame; `truncated: true` on a frame's entry means some were dropped there. Pass `frameId` (from `list_frames`) to scan one specific frame. Omit it to scan every frame at once — the response is then `{ok, frames: [{frameId, parentFrameId, url, elements, ...}], frameErrors: [...]}` grouped per frame, so you can tell a page's real content frame apart from an unrelated ad/tracking iframe instead of everything being interleaved.",
+      inputSchema: { tabId: z.number(), frameId: z.number().optional() },
+    },
+    async ({ tabId, frameId }) => {
+      const result = await bridgeClient.call({ type: 'list_elements', tabId, frameId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'list_frames',
+    {
+      description:
+        "List every frame (top frame plus all iframes) in a leased tab: `{frameId, parentFrameId, url}` each. frameId 0 is always the top frame. Use this to find the frameId of an iframe whose content `read_page`/`list_elements`/`click`/`type` should target — most pages have only frame 0, but some (e.g. a settings panel or embedded widget) render their real content inside an iframe.",
       inputSchema: { tabId: z.number() },
     },
     async ({ tabId }) => {
-      const result = await bridgeClient.call({ type: 'list_elements', tabId });
+      const result = await bridgeClient.call({ type: 'list_frames', tabId });
       return toolResult(result);
     }
   );
