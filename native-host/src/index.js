@@ -75,8 +75,19 @@ async function main() {
       return;
     }
     // Everything else is forwarded to the extension over native messaging
-    // and the response is relayed back once Firefox replies.
-    pending.set(msg.requestId, (reply) => respond(reply));
+    // and the response is relayed back once Firefox replies. `screenshot`
+    // responses are intercepted here: the raw dataUrl could exceed the
+    // native-messaging size cap, so we store it via PayloadStore and hand
+    // back an opaque handle instead.
+    pending.set(msg.requestId, async (reply) => {
+      if (msg.type === 'screenshot' && reply.ok && reply.dataUrl) {
+        const base64 = reply.dataUrl.split(',')[1];
+        const handle = await payloadStore.create(Buffer.from(base64, 'base64'));
+        respond({ ok: true, handle });
+        return;
+      }
+      respond(reply);
+    });
     process.stdout.write(encodeMessage(msg));
   });
 

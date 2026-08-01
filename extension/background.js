@@ -152,6 +152,8 @@ async function handleNativeMessage(msg) {
       case 'type':
       case 'read_page':
         return respond(await forwardToContentScript(msg));
+      case 'screenshot':
+        return respond(await handleScreenshot(msg));
       default:
         return respond({ ok: false, error: `unknown message type: ${msg.type}` });
     }
@@ -206,6 +208,15 @@ async function handleListTabs() {
       leasedBy: leaseOwner.get(t.id) || null,
     })),
   };
+}
+
+async function handleScreenshot(msg) {
+  const lease = checkLease(msg.sessionId, msg.tabId);
+  if (!lease.ok) return { ok: false, error: lease.error };
+  const dataUrl = await browser.tabs.captureTab(msg.tabId, { format: 'png' });
+  // Returned to the native host as-is; index.js (Task 6/14) turns this into
+  // a payload-store handle before the MCP server ever sees raw bytes.
+  return { ok: true, dataUrl };
 }
 
 async function forwardToContentScript(msg) {
