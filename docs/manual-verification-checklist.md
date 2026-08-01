@@ -22,6 +22,11 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `click` on a known selector (test against a simple local HTML page) actually clicks
 - [ ] `type` on an input field sets its value and fires `input`/`change` (verify via a page that echoes input state)
 - [ ] `read_page` returns the page's visible text
+- [ ] `read_page` / `list_elements` on a page that renders its content inside an `<iframe>` do NOT see the iframe's content — only the top document (`content_scripts` is `all_frames: false`; known gap, not yet fixed)
+- [ ] `list_elements` returns interactive elements with working `selector`s; a follow-up `click`/`type` using one of those selectors hits exactly the inspected element
+- [ ] `list_elements` on a page whose clickable targets are plain `li`/`span`/`div` with a JS-bound (not inline `onclick`) handler still finds them via the `cursor: pointer` heuristic
+- [ ] `list_elements` / `click` / `type` work on a plain-`http://` (non-HTTPS, non-localhost) page, e.g. a LAN device admin UI — this is an insecure context, which previously broke id generation (`crypto.randomUUID` throws there; fixed by switching to `crypto.getRandomValues`)
+- [ ] A tool call against a Firefox session-restore tab that hasn't been visited yet (e.g. right after a Firefox restart, before clicking into the tab) returns `tab_not_loaded`, not a generic injection-failure error
 - [ ] `screenshot` returns base64 PNG bytes that decode to a valid image
 - [ ] `screenshot` of a large/retina full-page capture (>1 MiB PNG) still succeeds — this exercises the multi-chunk native-messaging path
 - [ ] `start_console` + a page `console.log(...)` + `get_console` returns that message
