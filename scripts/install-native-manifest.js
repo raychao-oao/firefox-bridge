@@ -29,8 +29,15 @@ async function writeLauncherScript(manifestDir) {
   // A tiny shell launcher keeps the manifest pointing at something spawnable
   // without requiring native-host/src/index.js itself to have a shebang
   // (Windows compatibility, if ever added, would need a .bat variant instead).
+  //
+  // Firefox launched from Finder/Dock gets a minimal PATH that typically
+  // does NOT include Homebrew's /opt/homebrew/bin (Apple Silicon) or
+  // /usr/local/bin (Intel) -- `exec node ...` would silently fail to find
+  // node with no useful error surfaced back through the native messaging
+  // port. Use the absolute path to the node binary that is running this
+  // installer script (process.execPath) instead of relying on PATH.
   const launcherPath = path.join(manifestDir, '..', 'firefox-bridge-launch.sh');
-  const script = `#!/bin/sh\nexec node "${NATIVE_HOST_ENTRY}"\n`;
+  const script = `#!/bin/sh\nexec "${process.execPath}" "${NATIVE_HOST_ENTRY}"\n`;
   await writeFile(launcherPath, script, { mode: 0o755 });
   return launcherPath;
 }
