@@ -329,7 +329,24 @@ async function forwardToContentScript(msg) {
   try {
     return await browser.tabs.sendMessage(msg.tabId, msg);
   } catch (err) {
-    return { ok: false, error: `content_script_unreachable: ${err.message}` };
+    // The tab may predate this extension being loaded/reloaded -- manifest.json's
+    // content_scripts only auto-inject on new navigations, not into already-open
+    // tabs. Inject on demand and retry once before giving up, so "operate the
+    // user's existing, already-logged-in tabs" (this project's whole point)
+    // actually works on tabs opened before the extension started.
+    try {
+      await browser.scripting.executeScript({
+        target: { tabId: msg.tabId },
+        files: ['content-script.js'],
+      });
+    } catch (injectErr) {
+      return { ok: false, error: `content_script_inject_failed: ${injectErr.message}` };
+    }
+    try {
+      return await browser.tabs.sendMessage(msg.tabId, msg);
+    } catch (retryErr) {
+      return { ok: false, error: `content_script_unreachable: ${retryErr.message}` };
+    }
   }
 }
 
