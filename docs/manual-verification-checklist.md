@@ -22,11 +22,22 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `click` on a known selector (test against a simple local HTML page) actually clicks
 - [ ] `type` on an input field sets its value and fires `input`/`change` (verify via a page that echoes input state)
 - [ ] `read_page` returns the page's visible text
-- [ ] `read_page` / `list_elements` on a page that renders its content inside an `<iframe>` do NOT see the iframe's content — only the top document (`content_scripts` is `all_frames: false`; known gap, not yet fixed)
 - [ ] `list_elements` returns interactive elements with working `selector`s; a follow-up `click`/`type` using one of those selectors hits exactly the inspected element
 - [ ] `list_elements` on a page whose clickable targets are plain `li`/`span`/`div` with a JS-bound (not inline `onclick`) handler still finds them via the `cursor: pointer` heuristic
 - [ ] `list_elements` / `click` / `type` work on a plain-`http://` (non-HTTPS, non-localhost) page, e.g. a LAN device admin UI — this is an insecure context, which previously broke id generation (`crypto.randomUUID` throws there; fixed by switching to `crypto.getRandomValues`)
 - [ ] A tool call against a Firefox session-restore tab that hasn't been visited yet (e.g. right after a Firefox restart, before clicking into the tab) returns `tab_not_loaded`, not a generic injection-failure error
+- [ ] `type` against a `<select>` sets the option matching `text` (by `value`, falling back to visible text) and fires `change` — verify against a real multi-option dropdown, not just a text input
+- [ ] `list_elements` on a `<select>` includes an `options: [{value, text}]` array matching the page's real `<option>` list
+
+### Frames (`content_scripts` is `all_frames: true`)
+- [ ] `list_frames` on a page with no iframes returns exactly one frame (`frameId: 0`)
+- [ ] `list_frames` on a page with a nested `<iframe><iframe>...` returns every frame with correct `parentFrameId` chains
+- [ ] `read_page` / `list_elements` with no `frameId` on a page WITH iframes returns `{frames: [...], frameErrors: [...]}` grouped per frame, not a single merged blob — content that only exists inside an iframe (e.g. a settings panel embedded via `<iframe>`) shows up under its own frame entry
+- [ ] `read_page` / `list_elements` with an explicit `frameId` returns that one frame's content in the pre-frame-work flat shape (no `frames` wrapper)
+- [ ] `click` / `type` with an explicit non-zero `frameId` hits the element inside that iframe, not a same-selector match in the top frame
+- [ ] `click` / `type` with `frameId` omitted defaults to the top frame (0) — does NOT reach into iframes
+- [ ] A blacklisted URL loaded inside an iframe (top-level page itself NOT blacklisted) still triggers the confirmation gate when that specific frame is read/clicked — the top-level page being allowed must not leak the embedded frame
+- [ ] An unreachable frame (e.g. `about:blank`, or one blocked by host permissions) appears in `frameErrors` with a real per-frame error, and does NOT fail the whole aggregate `read_page`/`list_elements` call for the other frames
 - [ ] `screenshot` returns base64 PNG bytes that decode to a valid image
 - [ ] `screenshot` of a large/retina full-page capture (>1 MiB PNG) still succeeds — this exercises the multi-chunk native-messaging path
 - [ ] `start_console` + a page `console.log(...)` + `get_console` returns that message
