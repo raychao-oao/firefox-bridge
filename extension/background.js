@@ -33,8 +33,8 @@ let sessionGrants = new Map(); // sessionId -> Set<hostname>
 function connectToNativeHost() {
   nativePort = browser.runtime.connectNative('firefox_bridge_native_host');
   nativePort.onMessage.addListener((msg) => handleNativeMessage(msg));
-  nativePort.onDisconnect.addListener(() => {
-    console.warn('firefox-bridge: native port disconnected', browser.runtime.lastError);
+  nativePort.onDisconnect.addListener((port) => {
+    console.warn('firefox-bridge: native port disconnected', port.error);
     nativePort = null;
     onNativePortLost();
     scheduleReconnect();
