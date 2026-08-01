@@ -21,8 +21,18 @@ if (window.__firefoxBridgeContentScriptInstalled) {
   // page reloading, which would reset an in-memory counter to 0 while
   // already-tagged elements keep their old data-fb-id attributes --
   // colliding with the fresh counter's output and making one selector match
-  // two unrelated elements. crypto.randomUUID() sidesteps this entirely, no
-  // state to lose.
+  // two unrelated elements.
+  //
+  // crypto.randomUUID() would sidestep this with no state to lose, but it
+  // throws on any insecure-context page (plain http://, e.g. a router admin
+  // UI at http://10.0.0.1) -- confirmed live, "crypto.randomUUID is not a
+  // function". getRandomValues() has no such restriction, so build the ID
+  // from that instead.
+  function fbGenerateId() {
+    const bytes = new Uint8Array(9);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
 
   browser.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
     if (msg.type === 'click') {
@@ -98,7 +108,7 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) continue; // hidden/detached, not clickable
         if (!el.dataset.fbId) {
-          el.dataset.fbId = crypto.randomUUID();
+          el.dataset.fbId = fbGenerateId();
         }
         const label =
           (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
