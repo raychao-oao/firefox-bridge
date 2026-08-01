@@ -148,6 +148,10 @@ async function handleNativeMessage(msg) {
         return respond(await handleNavigate(msg));
       case 'list_tabs':
         return respond(await handleListTabs());
+      case 'click':
+      case 'type':
+      case 'read_page':
+        return respond(await forwardToContentScript(msg));
       default:
         return respond({ ok: false, error: `unknown message type: ${msg.type}` });
     }
@@ -202,6 +206,16 @@ async function handleListTabs() {
       leasedBy: leaseOwner.get(t.id) || null,
     })),
   };
+}
+
+async function forwardToContentScript(msg) {
+  const lease = checkLease(msg.sessionId, msg.tabId);
+  if (!lease.ok) return { ok: false, error: lease.error };
+  try {
+    return await browser.tabs.sendMessage(msg.tabId, msg);
+  } catch (err) {
+    return { ok: false, error: `content_script_unreachable: ${err.message}` };
+  }
 }
 
 // Tab close invalidates any lease on it (spec: lease invalidation on tab close).
