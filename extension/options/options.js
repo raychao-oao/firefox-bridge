@@ -14,6 +14,19 @@ async function loadAndRender() {
   }
 }
 
+// PolicyGate.isBlacklisted() compares against new URL(url).hostname — a bare
+// hostname like "www.example.com", never a full URL. Storing anything else
+// (a pasted "https://www.example.com/") makes the entry silently never match.
+function normalizeHostname(value) {
+  try {
+    const hasScheme = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(value);
+    const url = new URL(hasScheme ? value : `http://${value}`);
+    return url.hostname || null;
+  } catch {
+    return null;
+  }
+}
+
 async function addHostname(hostname) {
   const { blacklist = [] } = await browser.storage.local.get('blacklist');
   if (!blacklist.includes(hostname)) {
@@ -30,11 +43,20 @@ async function removeHostname(hostname) {
 
 document.getElementById('add-hostname').addEventListener('click', () => {
   const input = document.getElementById('new-hostname');
+  const errorEl = document.getElementById('hostname-error');
   const value = input.value.trim();
-  if (value) {
-    addHostname(value);
-    input.value = '';
+  if (!value) return;
+
+  const hostname = normalizeHostname(value);
+  if (!hostname) {
+    errorEl.textContent = `"${value}" doesn't look like a valid hostname.`;
+    errorEl.style.display = '';
+    return;
   }
+
+  errorEl.style.display = 'none';
+  addHostname(hostname);
+  input.value = '';
 });
 
 loadAndRender();
