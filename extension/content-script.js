@@ -15,7 +15,14 @@ if (window.__firefoxBridgeContentScriptInstalled) {
   // attribute and hands back a selector keyed on it -- the caller (an LLM
   // driving `click`/`type`) gets a selector guaranteed to match exactly the
   // element it inspected, no guessing.
-  let fbIdCounter = 0;
+  //
+  // IDs must be globally unique DOM-wide, not just within one script
+  // instance: the extension (and so this script) can reload without the
+  // page reloading, which would reset an in-memory counter to 0 while
+  // already-tagged elements keep their old data-fb-id attributes --
+  // colliding with the fresh counter's output and making one selector match
+  // two unrelated elements. crypto.randomUUID() sidesteps this entirely, no
+  // state to lose.
 
   browser.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
     if (msg.type === 'click') {
@@ -91,8 +98,7 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) continue; // hidden/detached, not clickable
         if (!el.dataset.fbId) {
-          fbIdCounter += 1;
-          el.dataset.fbId = String(fbIdCounter);
+          el.dataset.fbId = crypto.randomUUID();
         }
         const label =
           (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
