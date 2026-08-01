@@ -3,10 +3,16 @@
   "name": "firefox-bridge",
   "version": "0.1.0",
   "description": "Lets MCP-capable CLIs (Claude Code, Codex, etc.) operate your existing Firefox tabs.",
-  "applications": {
+  "browser_specific_settings": {
     "gecko": {
       "id": "firefox-bridge@firefox-bridge.local",
-      "strict_min_version": "115.0"
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      },
+      "gecko_android": {
+        "strict_min_version": null
+      }
     }
   },
   "permissions": [
