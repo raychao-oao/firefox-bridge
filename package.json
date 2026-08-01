@@ -1,0 +1,15 @@
+{
+  "name": "firefox-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "native-host",
+    "mcp-server"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "npm run test -w native-host && npm run test -w mcp-server"
+  }
+}
