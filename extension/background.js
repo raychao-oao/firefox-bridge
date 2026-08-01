@@ -19,6 +19,18 @@ const policyGate = new PolicyGate({
 // the 1 MiB native-messaging cap. Oldest entries are dropped first.
 const MAX_BUFFER_ENTRIES = 500;
 
+// Entry count alone doesn't bound total size: a single console.log of a large
+// object/stack trace, or a script request URL with a long query string (seen
+// live on pagespeed.web.dev — Google's module loader packs feature-flag lists
+// into the URL itself), can each be tens of KB. Cap individual string fields
+// too so one chatty entry can't dominate a get_console/get_network response.
+const MAX_FIELD_LENGTH = 2000;
+
+function truncateField(str) {
+  if (typeof str !== 'string' || str.length <= MAX_FIELD_LENGTH) return str;
+  return `${str.slice(0, MAX_FIELD_LENGTH)}...[truncated, ${str.length} chars total]`;
+}
+
 // Screenshot dataUrls routinely exceed the 1 MiB native-messaging cap, so they
 // are sent to the host in chunks. 700 KiB leaves ample room for the JSON
 // envelope inside the 1 MiB frame limit.
@@ -505,7 +517,10 @@ async function handleGetConsole(msg) {
 browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg.type === 'console-message' && sender.tab) {
     const buf = consoleBuffers.get(sender.tab.id);
-    if (buf) pushBounded(buf, { level: msg.level, args: msg.args, timestamp: msg.timestamp });
+    if (buf) {
+      const args = Array.isArray(msg.args) ? msg.args.map(truncateField) : msg.args;
+      pushBounded(buf, { level: msg.level, args, timestamp: msg.timestamp });
+    }
   }
 });
 
@@ -517,7 +532,7 @@ browser.webRequest.onCompleted.addListener(
     const buf = networkBuffers.get(details.tabId);
     if (!buf) return; // only buffer for tabs with an active subscription
     pushBounded(buf, {
-      url: details.url,
+      url: truncateField(details.url),
       method: details.method,
       statusCode: details.statusCode,
       type: details.type,

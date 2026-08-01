@@ -41,6 +41,8 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `screenshot` returns base64 PNG bytes that decode to a valid image
 - [ ] `screenshot` of a large/retina full-page capture (>1 MiB PNG) still succeeds — this exercises the multi-chunk native-messaging path
 - [ ] `start_console` + a page `console.log(...)` + `get_console` returns that message
+- [ ] `console.log()`ing a very long string (>2000 chars) or large object results in a `get_console` entry truncated to ~2000 chars with a `...[truncated, N chars total]` marker, not the full original length
+- [ ] Navigating to a page whose script requests have very long URLs (e.g. `pagespeed.web.dev`) results in `get_network` entries with `url` truncated to ~2000 chars with the same marker
 - [ ] `get_console` / `get_network` before their `start_*` call returns `not_subscribed` (not an empty list)
 - [ ] `start_network` *then* `navigate` — `get_network` includes the page-load requests (traffic before `start_network` is not captured, by design)
 - [ ] `get_network` returns observed requests for that tab only (open a second leased tab making different requests, confirm no cross-tab leakage)
