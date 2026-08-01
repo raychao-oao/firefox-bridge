@@ -31,3 +31,14 @@ browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   return false; // not handled by this listener
 });
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+  if (!event.data || event.data.__firefoxBridge !== 'console') return;
+  browser.runtime.sendMessage({
+    type: 'console-message',
+    level: event.data.level,
+    args: event.data.args,
+    timestamp: event.data.timestamp,
+  });
+});

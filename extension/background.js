@@ -154,6 +154,10 @@ async function handleNativeMessage(msg) {
         return respond(await forwardToContentScript(msg));
       case 'screenshot':
         return respond(await handleScreenshot(msg));
+      case 'start_console':
+        return respond(await handleStartConsole(msg));
+      case 'get_console':
+        return respond(handleGetConsole(msg));
       default:
         return respond({ ok: false, error: `unknown message type: ${msg.type}` });
     }
@@ -232,6 +236,33 @@ async function forwardToContentScript(msg) {
 // Tab close invalidates any lease on it (spec: lease invalidation on tab close).
 browser.tabs.onRemoved.addListener((tabId) => {
   leaseOwner.delete(tabId);
+});
+
+const consoleBuffers = new Map(); // tabId -> array of {level, args, timestamp}
+
+async function handleStartConsole(msg) {
+  const lease = checkLease(msg.sessionId, msg.tabId);
+  if (!lease.ok) return { ok: false, error: lease.error };
+  consoleBuffers.set(msg.tabId, []);
+  await browser.scripting.executeScript({
+    target: { tabId: msg.tabId },
+    files: ['console-inject.js'],
+    world: 'MAIN',
+  });
+  return { ok: true };
+}
+
+function handleGetConsole(msg) {
+  const lease = checkLease(msg.sessionId, msg.tabId);
+  if (!lease.ok) return { ok: false, error: lease.error };
+  return { ok: true, messages: consoleBuffers.get(msg.tabId) || [] };
+}
+
+browser.runtime.onMessage.addListener((msg, sender) => {
+  if (msg.type === 'console-message' && sender.tab) {
+    const buf = consoleBuffers.get(sender.tab.id);
+    if (buf) buf.push({ level: msg.level, args: msg.args, timestamp: msg.timestamp });
+  }
 });
 
 connectToNativeHost();
