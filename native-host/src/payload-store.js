@@ -1,9 +1,10 @@
 import { writeFile, readFile, unlink, mkdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 
 export class PayloadStore {
-  constructor(dir) {
+  constructor(dir = path.join(tmpdir(), 'firefox-bridge-payloads')) {
     this.dir = dir;
     this.handles = new Map(); // handle -> absolute file path
   }

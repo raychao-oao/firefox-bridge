@@ -56,3 +56,23 @@ test('invalidateAll deletes all outstanding files and clears handles', async () 
     assert.deepEqual(await readdir(dir), []);
   });
 });
+
+test('constructor with no arguments uses default temp directory', async () => {
+  // Create store with no arguments (will use default temp dir)
+  const store = new PayloadStore();
+  const testData = Buffer.from('default-dir-test');
+
+  try {
+    // Verify create() works with default directory
+    const handle = await store.create(testData);
+    assert.equal(typeof handle, 'string');
+
+    // Verify read() works with default directory
+    const readData = await store.read(handle);
+    assert.equal(readData.toString('utf8'), 'default-dir-test');
+  } finally {
+    // Clean up: invalidate any remaining files and remove the default directory
+    await store.invalidateAll();
+    await rm(store.dir, { recursive: true, force: true });
+  }
+});
