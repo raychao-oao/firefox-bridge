@@ -233,6 +233,7 @@ async function handleNativeMessage(msg) {
       case 'click':
       case 'type':
       case 'read_page':
+      case 'list_elements':
         return respond(await forwardToContentScript(msg));
       case 'screenshot':
         // Responds itself (chunked); see handleScreenshot.

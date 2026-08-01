@@ -51,6 +51,19 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'list_elements',
+    {
+      description:
+        "List interactive elements (links, buttons, inputs, selects, textareas, ARIA button/link/menuitem/tab roles) currently visible in a leased tab. Each entry includes a `selector` you can pass directly to `click`/`type` — it targets exactly the inspected element, no guessing required. Capped at 300 elements per call; `truncated: true` means some were dropped.",
+      inputSchema: { tabId: z.number() },
+    },
+    async ({ tabId }) => {
+      const result = await bridgeClient.call({ type: 'list_elements', tabId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'screenshot',
     {
       description: 'Capture a screenshot of a leased tab. Returns PNG bytes (base64) fetched via the payload-handle path.',

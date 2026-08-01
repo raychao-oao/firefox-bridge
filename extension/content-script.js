@@ -10,6 +10,13 @@ if (window.__firefoxBridgeContentScriptInstalled) {
 } else {
   window.__firefoxBridgeContentScriptInstalled = true;
 
+  // Selector-guessing from outside the page is unreliable (no visibility into
+  // the DOM), so list_elements tags each candidate with a stable data
+  // attribute and hands back a selector keyed on it -- the caller (an LLM
+  // driving `click`/`type`) gets a selector guaranteed to match exactly the
+  // element it inspected, no guessing.
+  let fbIdCounter = 0;
+
   browser.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
     if (msg.type === 'click') {
       const el = document.querySelector(msg.selector);
@@ -50,6 +57,48 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         });
       }
       return Promise.resolve({ ok: true, text: full, truncated: false });
+    }
+
+    if (msg.type === 'list_elements') {
+      // Interactive-element candidates only -- a page-wide "*" scan would
+      // both blow past MAX_ELEMENTS instantly and return mostly noise
+      // (click/type only ever target things a user could actually interact
+      // with).
+      const CANDIDATE_SELECTOR =
+        'a, button, input, select, textarea, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="tab"], summary';
+      // Caps the response well under the 1 MiB native-messaging frame limit
+      // even on a link-heavy page; excess candidates are dropped, not
+      // paginated -- MVP scope, revisit if this proves too small in practice.
+      const MAX_ELEMENTS = 300;
+      const candidates = Array.from(document.querySelectorAll(CANDIDATE_SELECTOR));
+      const elements = [];
+      for (const el of candidates) {
+        if (elements.length >= MAX_ELEMENTS) break;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) continue; // hidden/detached, not clickable
+        if (!el.dataset.fbId) {
+          fbIdCounter += 1;
+          el.dataset.fbId = String(fbIdCounter);
+        }
+        const label =
+          (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .slice(0, 100);
+        elements.push({
+          selector: `[data-fb-id="${el.dataset.fbId}"]`,
+          tag: el.tagName.toLowerCase(),
+          text: label,
+          type: el.getAttribute('type') || undefined,
+          href: el.getAttribute('href') || undefined,
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        elements,
+        totalCandidates: candidates.length,
+        truncated: candidates.length > elements.length,
+      });
     }
 
     return false; // not handled by this listener
