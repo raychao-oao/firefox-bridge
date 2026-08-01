@@ -80,13 +80,17 @@ async function main() {
     // native-messaging size cap, so we store it via PayloadStore and hand
     // back an opaque handle instead.
     pending.set(msg.requestId, async (reply) => {
-      if (msg.type === 'screenshot' && reply.ok && reply.dataUrl) {
-        const base64 = reply.dataUrl.split(',')[1];
-        const handle = await payloadStore.create(Buffer.from(base64, 'base64'));
-        respond({ ok: true, handle });
-        return;
+      try {
+        if (msg.type === 'screenshot' && reply.ok && reply.dataUrl) {
+          const base64 = reply.dataUrl.split(',')[1];
+          const handle = await payloadStore.create(Buffer.from(base64, 'base64'));
+          respond({ ok: true, handle });
+          return;
+        }
+        respond(reply);
+      } catch (err) {
+        respond({ ok: false, error: err.message });
       }
-      respond(reply);
     });
     process.stdout.write(encodeMessage(msg));
   });
