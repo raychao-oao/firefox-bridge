@@ -46,6 +46,24 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       const el = document.querySelector(msg.selector);
       if (!el) return Promise.resolve({ ok: false, error: 'element_not_found' });
       el.focus();
+      if (el.tagName === 'SELECT') {
+        // A <select>'s native value setter isn't on HTMLInputElement's
+        // prototype -- calling that setter via .call() on a select throws
+        // ("Illegal invocation"). Selects also don't fire 'input', only
+        // 'change'. msg.text must match an <option>'s value attribute (or
+        // its text content, if the option has no value attribute) -- use
+        // list_elements on the select itself to see the available `options`.
+        const matchByValue = Array.from(el.options).some((o) => o.value === msg.text);
+        if (!matchByValue) {
+          const byText = Array.from(el.options).find((o) => o.textContent.trim() === msg.text);
+          if (!byText) return Promise.resolve({ ok: false, error: 'option_not_found' });
+          el.value = byText.value;
+        } else {
+          el.value = msg.text;
+        }
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return Promise.resolve({ ok: true });
+      }
       const setter = Object.getOwnPropertyDescriptor(
         el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
         'value'
@@ -121,6 +139,13 @@ if (window.__firefoxBridgeContentScriptInstalled) {
           text: label,
           type: el.getAttribute('type') || undefined,
           href: el.getAttribute('href') || undefined,
+          // A <select>'s value setter needs the option's `value` (falling
+          // back to its text) verbatim -- expose both since HTML often
+          // leaves `value` implicit (defaults to the option's text content).
+          options:
+            el.tagName === 'SELECT'
+              ? Array.from(el.options).map((o) => ({ value: o.value, text: o.textContent.trim() }))
+              : undefined,
         });
       }
       return Promise.resolve({
