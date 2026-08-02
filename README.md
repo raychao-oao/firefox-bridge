@@ -45,7 +45,7 @@ you're already using, logged into whatever you're logged into.
 `navigate`, `click`, `type`, `read_page`, `list_elements`, `list_frames`, `screenshot`,
 `scroll_to`, `start_console`/`get_console`, `start_network`/`get_network`,
 `acquire_tab`/`release_tab`, `list_tabs`, `search_history`, `add_bookmark`,
-`list_bookmarks`, `search_bookmarks`, `move_to_pending_deletion`, `list_containers`,
+`list_bookmarks`, `search_bookmarks`, `to_be_deleted`, `list_containers`,
 `create_container`, `wait_for`.
 
 `list_elements` discovers real CSS selectors for interactive elements instead of guessing
@@ -117,7 +117,7 @@ manual checklist to run through after changes there.
 - `add_bookmark`/`list_bookmarks`/`search_bookmarks` aren't policy-gated either, and results
   aren't filtered for blacklisted sites — same deliberate reasoning as `search_history` (see
   the bookmarks design spec)
-- `move_to_pending_deletion` never permanently deletes anything — it only moves items into a
+- `to_be_deleted` never permanently deletes anything — it only moves items into a
   fixed "Pending Deletion" folder. There is no tool to empty that folder or to truly delete
   bookmarks; that step is always manual, in Firefox's own bookmark manager (deliberate, see
   the bookmark-cleanup design spec)

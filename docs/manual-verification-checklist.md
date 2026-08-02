@@ -165,7 +165,7 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] With a very large number of bookmarks (or by temporarily lowering `MAX_BOOKMARK_RESULTS` for testing, then reverting), `list_bookmarks()`/`search_bookmarks` results are capped and the response includes `truncated: true` when the cap is hit
 
 ## Bookmark cleanup
-- [ ] `move_to_pending_deletion` called with `target` giving both `id` and `folder`, or neither, or an empty/whitespace-only string for either — all return `invalid_target`
+- [ ] `to_be_deleted` called with `target` giving both `id` and `folder`, or neither, or an empty/whitespace-only string for either — all return `invalid_target`
 - [ ] Called with `target.folder` set to `"/"` or `"//"` (non-empty raw string, but zero real path segments) — returns `invalid_target`
 - [ ] Called with a real bookmark's `id` — that bookmark disappears from its original folder and appears under "Pending Deletion"; `from`/`to` fields are correct
 - [ ] Called with a real folder path (containing sub-bookmarks) via `target.folder` — the entire folder, with all its contents, moves under "Pending Deletion"; nothing inside is lost

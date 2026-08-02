@@ -279,8 +279,8 @@ async function handleNativeMessage(msg) {
         return respond(await handleListBookmarks(msg));
       case 'search_bookmarks':
         return respond(await handleSearchBookmarks(msg));
-      case 'move_to_pending_deletion':
-        return respond(await handleMoveToPendingDeletion(msg));
+      case 'to_be_deleted':
+        return respond(await handleToBeDeleted(msg));
       case 'click':
         return respond(await handleClick(msg));
       case 'type':
@@ -811,7 +811,7 @@ async function isNodeOrAncestor(candidateId, startId) {
   return false;
 }
 
-async function handleMoveToPendingDeletion(msg) {
+async function handleToBeDeleted(msg) {
   const target = msg.target;
   const hasId = typeof target?.id === 'string' && target.id.trim() !== '';
   const hasFolder = typeof target?.folder === 'string' && target.folder.trim() !== '';
