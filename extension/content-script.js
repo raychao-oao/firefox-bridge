@@ -120,6 +120,20 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         if (getComputedStyle(el).cursor === 'pointer') heuristicCandidates.push(el);
       }
       const candidates = [...new Set([...semanticCandidates, ...heuristicCandidates])];
+      // A password/hidden/file input's .value can hold a real credential or
+      // secret (typed by the user, autofilled by Firefox's password manager
+      // between list_elements calls, or a CSRF/session token embedded by the
+      // page) -- never let it reach the label OR the new state.value field.
+      // ONE shared, case-insensitive check for both: HTML's `type` attribute
+      // is case-insensitive (`type="PASSWORD"` is still a password input),
+      // so `.toLowerCase()` it once and reuse the normalized value everywhere
+      // rather than repeating a case-sensitive `=== 'password'` comparison
+      // in two places that could drift out of sync.
+      const VALUE_EXCLUDED_TYPES = new Set(['password', 'hidden', 'file']);
+      // readOnly is only meaningful on text-like inputs -- reading it on a
+      // checkbox/radio/button/file input is safe (never throws) but always
+      // reports a meaningless `false`, which would look like a real signal.
+      const READONLY_APPLICABLE_TYPES = new Set(['text', 'email', 'url', 'tel', 'search', 'number', 'password']);
       const elements = [];
       for (const el of candidates) {
         if (elements.length >= MAX_ELEMENTS) break;
@@ -128,29 +142,56 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         if (!el.dataset.fbId) {
           el.dataset.fbId = fbGenerateId();
         }
-        // A password input's .value can hold a real credential (typed by the
-        // user or autofilled by Firefox's own password manager between
-        // list_elements calls) -- never let it reach the label, which flows
-        // straight into LLM context.
-        const isPassword = el.getAttribute('type') === 'password';
+        const tagName = el.tagName.toLowerCase();
+        const rawType = el.getAttribute('type');
+        const normalizedType = (rawType || '').toLowerCase();
+        const isPassword = normalizedType === 'password';
         const label =
           (el.innerText || (isPassword ? '' : el.value) || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
             .trim()
             .replace(/\s+/g, ' ')
             .slice(0, 100);
+
+        // Every element gets a `state` object -- never omitted, `{}` when
+        // nothing applies (see the design spec's "state 物件的存在性契約").
+        const state = {};
+        if (tagName === 'input' && (normalizedType === 'checkbox' || normalizedType === 'radio')) {
+          state.checked = el.checked;
+        }
+        if (
+          (tagName === 'input' && !VALUE_EXCLUDED_TYPES.has(normalizedType)) ||
+          tagName === 'textarea' ||
+          tagName === 'select'
+        ) {
+          state.value = el.value;
+        }
+        if (tagName === 'input' || tagName === 'select' || tagName === 'textarea' || tagName === 'button') {
+          state.disabled = el.disabled;
+        }
+        if ((tagName === 'input' && READONLY_APPLICABLE_TYPES.has(normalizedType)) || tagName === 'textarea') {
+          state.readonly = el.readOnly;
+        }
+        if (el.hasAttribute('aria-expanded')) {
+          state.ariaExpanded = el.getAttribute('aria-expanded');
+        }
+        if (el.hasAttribute('aria-checked')) {
+          state.ariaChecked = el.getAttribute('aria-checked');
+        }
+
         elements.push({
           selector: `[data-fb-id="${el.dataset.fbId}"]`,
-          tag: el.tagName.toLowerCase(),
+          tag: tagName,
           text: label,
-          type: el.getAttribute('type') || undefined,
+          type: rawType || undefined,
           href: el.getAttribute('href') || undefined,
           // A <select>'s value setter needs the option's `value` (falling
           // back to its text) verbatim -- expose both since HTML often
           // leaves `value` implicit (defaults to the option's text content).
           options:
-            el.tagName === 'SELECT'
+            tagName === 'select'
               ? Array.from(el.options).map((o) => ({ value: o.value, text: o.textContent.trim() }))
               : undefined,
+          state,
         });
       }
       return Promise.resolve({
