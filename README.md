@@ -40,7 +40,7 @@ you're already using, logged into whatever you're logged into.
 
 `navigate`, `click`, `type`, `read_page`, `list_elements`, `list_frames`, `screenshot`,
 `start_console`/`get_console`, `start_network`/`get_network`, `acquire_tab`/`release_tab`,
-`list_tabs`, `search_history`.
+`list_tabs`, `search_history`, `add_bookmark`, `list_bookmarks`, `search_bookmarks`.
 
 `list_elements` discovers real CSS selectors for interactive elements instead of guessing
 blindly — each one is guaranteed to match exactly the inspected element on a follow-up
@@ -97,6 +97,9 @@ manual checklist to run through after changes there.
 - `list_tabs` isn't policy-gated yet (returns all tab URLs/titles, including blacklisted
   ones)
 - `search_history` isn't policy-gated either — history results include blacklisted sites (deliberate for now, see the history-search design spec)
+- `add_bookmark`/`list_bookmarks`/`search_bookmarks` aren't policy-gated either, and results
+  aren't filtered for blacklisted sites — same deliberate reasoning as `search_history` (see
+  the bookmarks design spec)
 - Console/network capture is top-frame only, not frame-aware
 - Text truncation is char-count-based, not byte-based (risk on CJK-heavy pages)
 - WebMCP integration deferred to a future version
