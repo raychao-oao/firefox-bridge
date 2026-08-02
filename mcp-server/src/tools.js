@@ -1,5 +1,11 @@
 // repo/mcp-server/src/tools.js
 import { z } from 'zod';
+import { mkdir, writeFile, rename, unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+import os from 'node:os';
+
+const SCREENSHOT_DIR = path.resolve(os.tmpdir(), 'firefox-bridge-screenshots');
 
 export function registerTools(server, bridgeClient) {
   server.registerTool(
@@ -111,14 +117,33 @@ export function registerTools(server, bridgeClient) {
   server.registerTool(
     'screenshot',
     {
-      description: 'Capture a screenshot of a leased tab. Returns PNG bytes (base64) fetched via the payload-handle path.',
+      description: 'Capture a screenshot of a leased tab. Writes the PNG to a local file and returns its absolute path -- read the file directly (e.g. with a file-reading tool that supports images) rather than expecting image bytes in this response.',
       inputSchema: { tabId: z.number() },
     },
     async ({ tabId }) => {
       const captureResult = await bridgeClient.call({ type: 'screenshot', tabId });
       if (!captureResult.ok) return toolResult(captureResult);
       const payload = await bridgeClient.call({ type: 'payload-read', handle: captureResult.handle });
-      return toolResult(payload);
+      if (!payload.ok) return toolResult(payload);
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const id = randomUUID();
+      const filePath = path.join(SCREENSHOT_DIR, `screenshot-${timestamp}-${id}.png`);
+      const tmpPath = `${filePath}.tmp`;
+      try {
+        await mkdir(SCREENSHOT_DIR, { recursive: true, mode: 0o700 });
+        const bytes = Buffer.from(payload.dataBase64, 'base64');
+        // Write to a temp path first, then rename -- rename is atomic on the
+        // same filesystem (SCREENSHOT_DIR and its .tmp sibling always are),
+        // so a caller can never observe a partially-written PNG even if the
+        // write itself fails partway through.
+        await writeFile(tmpPath, bytes, { mode: 0o600 });
+        await rename(tmpPath, filePath);
+      } catch (err) {
+        await unlink(tmpPath).catch(() => {}); // best-effort cleanup of a failed temp write
+        return toolResult({ ok: false, error: `screenshot_file_write_failed: ${err.message}` });
+      }
+      return toolResult({ ok: true, path: filePath });
     }
   );
 
