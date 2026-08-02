@@ -47,6 +47,10 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] A `<select>`'s `state.value` matches its currently-selected `<option>`'s value and is consistent with the existing `options` array; after using `type` to change the selection, a fresh `list_elements` call reflects the new value
 - [ ] A plain `<a>` link (no form semantics, no relevant ARIA attributes) has `state: {}` — present as an empty object, not an exception and not a missing `state` field entirely
 - [ ] On a page with iframes, calling `list_elements` without `frameId` (multi-frame aggregation mode) — every element in every frame's entry still carries a correct `state` object, not dropped or overwritten during aggregation
+- [ ] `list_elements` on a page with fewer candidates than `MAX_ELEMENTS` (300) but with some hidden/detached elements filtered out — `truncated` reports `false` (regression guard: previously always reported `true` whenever any element was filtered, not just when the 300-cap was actually hit)
+- [ ] `list_elements` on a page with more than 300 candidate elements — `truncated` reports `true`, and `elements.length === 300`
+- [ ] `list_elements` on a custom checkbox built as `<div role="checkbox" aria-checked="true">` (no native `<input>`) — the element now appears in the results at all (regression guard: `CANDIDATE_SELECTOR` previously never matched `role="checkbox"`/`role="radio"`/`role="switch"`, so `state.ariaChecked` was documented but unreachable), and `state.ariaChecked === "true"`
+- [ ] Same check with `role="radio"` and `role="switch"` elements — both now appear in `list_elements` results
 
 ### Frames (`content_scripts` is `all_frames: true`)
 - [ ] `list_frames` on a page with no iframes returns exactly one frame (`frameId: 0`)

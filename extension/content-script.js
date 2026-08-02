@@ -100,7 +100,7 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       // (click/type only ever target things a user could actually interact
       // with).
       const CANDIDATE_SELECTOR =
-        'a, button, input, select, textarea, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="tab"], summary';
+        'a, button, input, select, textarea, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"], summary';
       // Caps the response well under the 1 MiB native-messaging frame limit
       // even on a link-heavy page; excess candidates are dropped, not
       // paginated -- MVP scope, revisit if this proves too small in practice.
@@ -147,8 +147,17 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       // the same protocol constraint).
       const MAX_VALUE_CHARS = 500;
       const elements = [];
+      // Tracks only "the MAX_ELEMENTS cap actually cut candidates off" --
+      // distinct from candidates.length > elements.length, which is also
+      // true whenever hidden/detached elements get filtered out below and
+      // was previously (mis)used as the truncation signal, making
+      // `truncated: true` on nearly every real page.
+      let cappedByLimit = false;
       for (const el of candidates) {
-        if (elements.length >= MAX_ELEMENTS) break;
+        if (elements.length >= MAX_ELEMENTS) {
+          cappedByLimit = true;
+          break;
+        }
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 && rect.height === 0) continue; // hidden/detached, not clickable
         if (!el.dataset.fbId) {
@@ -215,7 +224,7 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         ok: true,
         elements,
         totalCandidates: candidates.length,
-        truncated: candidates.length > elements.length,
+        truncated: cappedByLimit,
       });
     }
 
