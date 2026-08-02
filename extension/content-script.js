@@ -133,7 +133,19 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       // readOnly is only meaningful on text-like inputs -- reading it on a
       // checkbox/radio/button/file input is safe (never throws) but always
       // reports a meaningless `false`, which would look like a real signal.
-      const READONLY_APPLICABLE_TYPES = new Set(['text', 'email', 'url', 'tel', 'search', 'number', 'password', '']);
+      // Framed as a denylist (per the design spec's own "不含
+      // checkbox/radio/button/submit/reset/file" exclusion wording) rather
+      // than an allowlist, so newly-invented input types (date/month/week/
+      // time/datetime-local, and the typeless case) are readonly-applicable
+      // by default instead of silently falling through as "not applicable".
+      const READONLY_INAPPLICABLE_TYPES = new Set([
+        'checkbox', 'radio', 'button', 'submit', 'reset', 'file', 'image', 'hidden', 'color', 'range',
+      ]);
+      // Caps state.value so a page with a large <textarea>/CMS editor can't
+      // blow the response past the 1 MiB native-messaging frame limit (see
+      // the MAX_ELEMENTS comment above and read_page's 500,000-char cap for
+      // the same protocol constraint).
+      const MAX_VALUE_CHARS = 500;
       const elements = [];
       for (const el of candidates) {
         if (elements.length >= MAX_ELEMENTS) break;
@@ -145,9 +157,12 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         const tagName = el.tagName.toLowerCase();
         const rawType = el.getAttribute('type');
         const normalizedType = (rawType || '').toLowerCase();
-        const isPassword = normalizedType === 'password';
+        // Shared with state.value below -- a file input's .value ("local
+        // filename/fake path") must not leak into the label any more than a
+        // password/hidden input's value should.
+        const isValueExcluded = VALUE_EXCLUDED_TYPES.has(normalizedType);
         const label =
-          (el.innerText || (isPassword ? '' : el.value) || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
+          (el.innerText || (isValueExcluded ? '' : el.value) || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
             .trim()
             .replace(/\s+/g, ' ')
             .slice(0, 100);
@@ -159,16 +174,18 @@ if (window.__firefoxBridgeContentScriptInstalled) {
           state.checked = el.checked;
         }
         if (
-          (tagName === 'input' && !VALUE_EXCLUDED_TYPES.has(normalizedType)) ||
+          (tagName === 'input' && !isValueExcluded) ||
           tagName === 'textarea' ||
           tagName === 'select'
         ) {
-          state.value = el.value;
+          const rawValue = el.value ?? '';
+          state.value = rawValue.slice(0, MAX_VALUE_CHARS);
+          if (rawValue.length > MAX_VALUE_CHARS) state.valueTruncated = true;
         }
         if (tagName === 'input' || tagName === 'select' || tagName === 'textarea' || tagName === 'button') {
           state.disabled = el.disabled;
         }
-        if ((tagName === 'input' && READONLY_APPLICABLE_TYPES.has(normalizedType)) || tagName === 'textarea') {
+        if ((tagName === 'input' && !READONLY_INAPPLICABLE_TYPES.has(normalizedType)) || tagName === 'textarea') {
           state.readonly = el.readOnly;
         }
         if (el.hasAttribute('aria-expanded')) {

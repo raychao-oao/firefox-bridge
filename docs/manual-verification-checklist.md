@@ -36,9 +36,11 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] Same check with `type="PASSWORD"` (uppercase) — confirms the case-insensitive type check fix; `state.value` is still absent and the `text` label also doesn't leak the value
 - [ ] `list_elements` on a `type="hidden"` field with a value has no `state.value` key
 - [ ] `list_elements` on a `type="file"` input has no `state.value` key
+- [ ] `list_elements` on a `type="file"` input's `text` label does NOT contain the local filename/fake path — confirms the label-building logic excludes file inputs the same way it excludes password inputs, not just `state.value`
 - [ ] `list_elements` on a disabled button/field reports `state.disabled === true`; the same element type enabled reports `state.disabled === false` (always an explicit boolean when the element type applies, never omitted for being `false`)
 - [ ] An `input` inside a `<fieldset disabled>` also reports `state.disabled === true` (this falls out of `el.disabled` for free — no special-case code needed, just confirm it actually happens)
 - [ ] A readonly text input and a readonly textarea both report `state.readonly === true`
+- [ ] A readonly `<input readonly>` with **no** `type` attribute at all still reports `state.readonly === true` (regression guard for the typeless-input readonly fix)
 - [ ] A checkbox (where `readonly` has no meaning) has no `readonly` key in `state` at all — confirms the scope restriction to text-like input types
 - [ ] An element with `aria-expanded="true"` reports `state.ariaExpanded === "true"` (string); after it collapses, a fresh call reports `"false"`; an element with no `aria-expanded` attribute at all has no `ariaExpanded` key (not the string `"false"`)
 - [ ] An element with `aria-checked="mixed"` (e.g. a partially-selected tree node) reports `state.ariaChecked === "mixed"` verbatim — not coerced to `true` or `false`
