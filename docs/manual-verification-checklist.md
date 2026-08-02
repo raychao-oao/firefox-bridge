@@ -208,3 +208,14 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] Both sessions attempting `acquire_tab` on the *same* existing `tabId` — second one gets `conflict`
 - [ ] Kill session A's `mcp-server` process (Ctrl-C) while it holds a lease; session B can then `acquire_tab` that same `tabId` without a stale `conflict` (session_end reached the extension)
 - [ ] Killing session A does NOT disturb session B's existing lease on a different tab
+
+### Viewport tools (scroll_to, screenshot fullPage, list_elements tr/th)
+
+- [ ] On a page taller than the viewport, call `screenshot({fullPage: true})` and confirm the image includes content that was below the fold, uncropped
+- [ ] On the same page, call `screenshot({fullPage: false})` (or omit `fullPage`) and confirm behavior is unchanged from before this batch — only the current viewport is captured
+- [ ] On a page constructed to exceed 32767px in one dimension, call `screenshot({fullPage: true})` and confirm it returns `screenshot_too_large` rather than throwing or returning a corrupt image
+- [ ] Use `list_elements` to find the selector of a `<tr>` currently scrolled out of view, and confirm it appears in the candidate list (verifies `tr` was added to `CANDIDATE_SELECTOR`)
+- [ ] Call `scroll_to` with the selector from the previous step, and confirm the element is now within the visible viewport (cross-check with `screenshot({fullPage: false})` before/after, or `read_page`/`list_elements`)
+- [ ] Call `scroll_to` with a selector that matches nothing, and confirm it returns `element_not_found`
+- [ ] On a page with more than 300 interactive elements (e.g. a link-heavy homepage), call `list_elements` and confirm `truncated: true` when the cap is actually hit
+- [ ] Call `list_elements` with an explicit `frameId` and again with `frameId` omitted (aggregate mode), and confirm both response shapes are correct in each mode
