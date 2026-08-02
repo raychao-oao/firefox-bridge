@@ -374,6 +374,55 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       });
     }
 
+    if (msg.type === 'press_key') {
+      if (typeof msg.key !== 'string' || msg.key.length === 0) {
+        return Promise.resolve({ ok: false, error: 'invalid_key' });
+      }
+      let target;
+      // msg.selector !== undefined (not a truthiness check on msg.selector)
+      // -- an explicitly-passed empty string must be treated the same as any
+      // other selector-based tool (invalid_selector via querySelector's own
+      // syntax error, or element_not_found), not silently redirected to
+      // activeElement the way a falsy check would. Found by use-codex plan
+      // review: an earlier draft's `if (msg.selector)` made an empty-string
+      // selector behave inconsistently with every other selector-taking tool
+      // in this codebase.
+      if (msg.selector !== undefined) {
+        try {
+          target = document.querySelector(msg.selector);
+        } catch (err) {
+          return Promise.resolve({ ok: false, error: 'invalid_selector' });
+        }
+        if (!target) return Promise.resolve({ ok: false, error: 'element_not_found' });
+      } else {
+        // No selector: target whatever currently has focus in THIS frame.
+        // There's no sensible fallback search here (no way to know which
+        // frame "should" have focus), so this path is always single-frame
+        // (see background.js's routing for this case).
+        target = document.activeElement || document.body;
+      }
+      const modifiers = msg.modifiers || {};
+      const eventInit = {
+        key: msg.key,
+        bubbles: true,
+        cancelable: true,
+        shiftKey: !!modifiers.shift,
+        ctrlKey: !!modifiers.ctrl,
+        altKey: !!modifiers.alt,
+        metaKey: !!modifiers.meta,
+      };
+      // Synthetic (dispatchEvent) KeyboardEvents are always isTrusted:false --
+      // Firefox does not run native keyboard default actions (form
+      // submission on Enter, native dialog dismissal on Escape) for these.
+      // JS keydown/keyup listeners on the page DO see them, which is this
+      // tool's actual use case. keypress only for single-character keys,
+      // matching real browsers' legacy keypress behavior for printable keys.
+      target.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+      if (msg.key.length === 1) target.dispatchEvent(new KeyboardEvent('keypress', eventInit));
+      target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+      return Promise.resolve({ ok: true });
+    }
+
     if (msg.type === 'scroll_to') {
       let el;
       try {

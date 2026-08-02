@@ -289,6 +289,8 @@ async function handleNativeMessage(msg) {
         return respond(await forwardToContentScript(msg));
       case 'scroll_to':
         return respond(await forwardToContentScript(msg));
+      case 'press_key':
+        return respond(await forwardToContentScript(msg));
       case 'wait_for':
         return respond(await handleWaitFor(msg));
       case 'list_frames':
@@ -1213,6 +1215,27 @@ async function forwardToContentScript(msg) {
     // Single frame only, no cross-frame fallback search or aggregation --
     // a selector is always frame-local, and there's exactly one frame the
     // caller means to scroll within (default the top frame if unstated).
+    const frameId = msg.frameId ?? 0;
+    const gate = await privilegedGate(msg, { frameId });
+    if (!gate.ok) return gate;
+    return sendToFrame(msg.tabId, frameId, msg);
+  }
+
+  if (msg.type === 'press_key') {
+    if (msg.selector !== undefined) {
+      // Has a selector (including an explicit empty string -- consistent
+      // with content-script.js's own msg.selector !== undefined check):
+      // same frame-fallback shape as `type` -- omitted frameId searches
+      // other frames for the first where the selector resolves.
+      if (msg.frameId != null) {
+        const gate = await privilegedGate(msg, { frameId: msg.frameId });
+        if (!gate.ok) return gate;
+        return sendToFrame(msg.tabId, msg.frameId, msg);
+      }
+      return searchFramesForResult(msg, (frameId) => sendToFrame(msg.tabId, frameId, msg));
+    }
+    // No selector: single frame only (document.activeElement is inherently
+    // frame-scoped, no fallback search makes sense).
     const frameId = msg.frameId ?? 0;
     const gate = await privilegedGate(msg, { frameId });
     if (!gate.ok) return gate;

@@ -128,6 +128,30 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'press_key',
+    {
+      description:
+        "Dispatch a single key-press sequence (keydown, then keyup, with keypress in between for single-character keys) in a leased tab. `key` follows DOM KeyboardEvent.key naming (\"Escape\", \"Enter\", \"Tab\", \"ArrowDown\", or a single character). Pass `selector` to target a specific element (frame-fallback search applies when `frameId` is omitted, same as `click`/`type`); omit `selector` to target whatever currently has focus in the frame (`frameId` defaults to 0, no fallback search in this case -- there's no way to know which frame should have focus). Optional `modifiers: {shift?, ctrl?, alt?, meta?}`. IMPORTANT: this dispatches an untrusted synthetic event -- Firefox does NOT run native keyboard default actions for it, so Enter will NOT trigger a form's native submission and Escape will NOT dismiss a native alert()/confirm() dialog (this tool cannot interact with native browser dialogs at all). It DOES fire any JS keydown/keyup listeners the page has bound, which covers most modern SPA keyboard shortcuts and custom (non-native) dialogs that close on Escape via their own JS. This is not a substitute for `type` -- it does not dispatch input/beforeinput, so a printable `key` will not make text appear in a field.",
+      inputSchema: {
+        tabId: z.number(),
+        key: z.string(),
+        selector: z.string().optional(),
+        frameId: z.number().optional(),
+        modifiers: z.object({
+          shift: z.boolean().optional(),
+          ctrl: z.boolean().optional(),
+          alt: z.boolean().optional(),
+          meta: z.boolean().optional(),
+        }).optional(),
+      },
+    },
+    async ({ tabId, key, selector, frameId, modifiers }) => {
+      const result = await bridgeClient.call({ type: 'press_key', tabId, key, selector, frameId, modifiers });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'screenshot',
     {
       description: 'Capture a screenshot of a leased tab. Writes the PNG to a local file and returns its absolute path -- read the file directly (e.g. with a file-reading tool that supports images) rather than expecting image bytes in this response. Pass `fullPage: true` to capture the entire scrollable page instead of just the current viewport -- Firefox captures the full document area directly (best-effort; no scrolling or multi-shot stitching involved, and forced to 1x scale regardless of display DPI so the size check below stays accurate). Known limitation shared with `list_elements`: a fullPage capture only shows content the browser has actually rendered into the DOM -- virtualized/windowed UIs that only mount their visible rows will not "fill in" the rest. Fails with `screenshot_too_large` if either page dimension exceeds Firefox\'s ~32767px single-capture ceiling.',
