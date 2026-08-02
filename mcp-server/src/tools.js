@@ -18,11 +18,11 @@ export function registerTools(server, bridgeClient) {
     'click',
     {
       description:
-        'Click an element in a leased tab, identified by a CSS selector. Pass `frameId` to target a specific frame (get it from `list_frames` or a `list_elements` entry) — defaults to the top frame (0), which does NOT reach into iframes. `ok: true` only means the click event was dispatched, NOT that its expected effect happened — check the response fields: `navigated` (tab URL changed by the time this returned — a navigation that started but had not yet updated the tab URL will read as false), `dialogOpened` (this tool did not hear back from the page within ~600ms — a native confirm()/alert() blocking the page is the most likely cause, but a slow click handler, a debugger breakpoint, or a backgrounded/throttled tab can look identical; this tool cannot read or dismiss a dialog either way), `domChanged` (a coarse, best-effort signal that SOMETHING in the DOM changed, not a precise diff), and `newUrl` (present only when `navigated` is true). For a real change that may take longer than an instant, follow up with `wait_for`.',
-      inputSchema: { tabId: z.number(), selector: z.string(), frameId: z.number().optional() },
+        'Click an element in a leased tab, identified by a CSS selector. Pass `frameId` to target a specific frame (get it from `list_frames` or a `list_elements` entry) — defaults to the top frame (0), which does NOT reach into iframes. `ok: true` only means the click event was dispatched, NOT that its expected effect happened — check the response fields: `navigated` (tab URL changed by the time this returned — a navigation that started but had not yet updated the tab URL will read as false), `dialogOpened` (this tool did not hear back from the page within ~600ms — a native confirm()/alert() blocking the page is the most likely cause, but a slow click handler, a debugger breakpoint, or a backgrounded/throttled tab can look identical; this tool cannot read or dismiss a dialog either way), `domChanged` (a coarse, best-effort signal that SOMETHING in the DOM changed, not a precise diff), and `newUrl` (present only when `navigated` is true). For a real change that may take longer than an instant, follow up with `wait_for`. Optionally pass `expectedDomEpoch` (from a prior `list_elements` call, same `frameId`) to guard against acting on a stale selector — if the page has since changed (navigation, bfcache restoration), this returns `stale_selector` and does NOT click anything, instead of clicking whatever now happens to match the old selector.',
+      inputSchema: { tabId: z.number(), selector: z.string(), frameId: z.number().optional(), expectedDomEpoch: z.string().optional() },
     },
-    async ({ tabId, selector, frameId }) => {
-      const result = await bridgeClient.call({ type: 'click', tabId, selector, frameId });
+    async ({ tabId, selector, frameId, expectedDomEpoch }) => {
+      const result = await bridgeClient.call({ type: 'click', tabId, selector, frameId, expectedDomEpoch });
       return toolResult(result);
     }
   );
@@ -51,11 +51,11 @@ export function registerTools(server, bridgeClient) {
     'type',
     {
       description:
-        'Type text into an element in a leased tab, identified by a CSS selector. Pass `frameId` to target a specific frame (get it from `list_frames` or a `list_elements` entry) — defaults to the top frame (0), which does NOT reach into iframes.',
-      inputSchema: { tabId: z.number(), selector: z.string(), text: z.string(), frameId: z.number().optional() },
+        'Type text into an element in a leased tab, identified by a CSS selector. Pass `frameId` to target a specific frame (get it from `list_frames` or a `list_elements` entry) — defaults to the top frame (0), which does NOT reach into iframes. Optionally pass `expectedDomEpoch` (from a prior `list_elements` call, same `frameId`) to guard against acting on a stale selector — if the page has since changed (navigation, bfcache restoration), this returns `stale_selector` and does NOT type anything.',
+      inputSchema: { tabId: z.number(), selector: z.string(), text: z.string(), frameId: z.number().optional(), expectedDomEpoch: z.string().optional() },
     },
-    async ({ tabId, selector, text, frameId }) => {
-      const result = await bridgeClient.call({ type: 'type', tabId, selector, text, frameId });
+    async ({ tabId, selector, text, frameId, expectedDomEpoch }) => {
+      const result = await bridgeClient.call({ type: 'type', tabId, selector, text, frameId, expectedDomEpoch });
       return toolResult(result);
     }
   );
@@ -77,11 +77,20 @@ export function registerTools(server, bridgeClient) {
     'list_elements',
     {
       description:
-        "List interactive elements (links, buttons, inputs, selects, textareas, ARIA button/link/menuitem/tab roles) currently visible in a leased tab. Each entry includes a `selector` and `frameId` you can pass directly to `click`/`type` — guaranteed to target exactly the inspected element, no guessing required. Capped at 300 elements per frame; `truncated: true` on a frame's entry means some were dropped there. Pass `frameId` (from `list_frames`) to scan one specific frame. Omit it to scan every frame at once — the response is then `{ok, frames: [{frameId, parentFrameId, url, elements, ...}], frameErrors: [...]}` grouped per frame, so you can tell a page's real content frame apart from an unrelated ad/tracking iframe instead of everything being interleaved. Each element also carries a `state` object (always present, `{}` if nothing applies) so you can read current form-control state without a screenshot: `checked` (checkbox/radio only), `value` (input/textarea/select, but NEVER for password/hidden/file inputs — that key is deliberately absent for those, not an empty string), `disabled`/`readonly` (booleans, only on applicable control types), `ariaExpanded`/`ariaChecked` (raw ARIA attribute strings, e.g. `\"true\"`/`\"false\"`/`\"mixed\"` — not coerced to boolean, only present when the attribute exists on the element).",
-      inputSchema: { tabId: z.number(), frameId: z.number().optional() },
+        "List interactive elements (links, buttons, inputs, selects, textareas, ARIA button/link/menuitem/tab roles) currently visible in a leased tab. Each entry includes a `selector` and `frameId` you can pass directly to `click`/`type` — guaranteed to target exactly the inspected element, no guessing required. Capped at 300 elements per frame; `truncated: true` on a frame's entry means some were dropped there. Pass `frameId` (from `list_frames`) to scan one specific frame. Omit it to scan every frame at once — the response is then `{ok, frames: [{frameId, parentFrameId, url, elements, ...}], frameErrors: [...]}` grouped per frame, so you can tell a page's real content frame apart from an unrelated ad/tracking iframe instead of everything being interleaved. Each element also carries a `state` object (always present, `{}` if nothing applies) so you can read current form-control state without a screenshot: `checked` (checkbox/radio only), `value` (input/textarea/select, but NEVER for password/hidden/file inputs — that key is deliberately absent for those, not an empty string), `disabled`/`readonly` (booleans, only on applicable control types), `ariaExpanded`/`ariaChecked` (raw ARIA attribute strings, e.g. `\"true\"`/`\"false\"`/`\"mixed\"` — not coerced to boolean, only present when the attribute exists on the element). Pass `filter` to narrow the scan instead of always scanning the whole page/frame: `text` (case-insensitive substring match against the full element label), `tag` (case-insensitive exact tag match), `type` (case-insensitive exact `type` attribute match), `container` (a CSS selector — only scans descendants of the first matching element; an invalid selector returns `invalid_container_selector`, a valid-but-unmatched one returns a normal empty result). Filtering narrows the candidate set BEFORE the 300-element cap, so a filtered-for element on a large page won't be dropped by the cap. The response also includes `domEpoch` — a per-frame value that changes on real navigation and on bfcache restoration (but NOT on same-page SPA route changes), for use with `click`/`type`'s `expectedDomEpoch` parameter to detect a stale cached selector.",
+      inputSchema: {
+        tabId: z.number(),
+        frameId: z.number().optional(),
+        filter: z.object({
+          text: z.string().optional(),
+          tag: z.string().optional(),
+          type: z.string().optional(),
+          container: z.string().optional(),
+        }).optional(),
+      },
     },
-    async ({ tabId, frameId }) => {
-      const result = await bridgeClient.call({ type: 'list_elements', tabId, frameId });
+    async ({ tabId, frameId, filter }) => {
+      const result = await bridgeClient.call({ type: 'list_elements', tabId, frameId, filter });
       return toolResult(result);
     }
   );
