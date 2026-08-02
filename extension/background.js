@@ -303,12 +303,98 @@ async function handleNativeMessage(msg) {
   }
 }
 
+// Creates a tab via createTab() and waits for its top-frame navigation to
+// commit (URL finalized, page starting to load) -- NOT full page load
+// (webNavigation.onCompleted would wait for every subresource too, which
+// is unrelated to what this fixes: only the URL field being briefly
+// stale).
+//
+// The onCommitted listener is armed BEFORE calling createTab(), not after
+// it resolves -- a fast navigation can commit before tabs.create()'s
+// promise resolves, and installing the listener only afterward would miss
+// that commit entirely, making an ordinary fast navigation wait out the
+// full timeout for no reason (a defect an earlier draft of this design had,
+// caught by use-codex review). Because we don't know our own tab's id until
+// createTab() resolves, commits seen before then are buffered by tabId and
+// checked once the id is known.
+//
+// Returns { tab, committed }. `committed: true` means a matching commit was
+// observed (either buffered before the tab id was known, or live
+// afterward) -- the returned `tab` is still the pre-commit object from
+// createTab() in that case; the caller re-fetches via browser.tabs.get()
+// to see the post-commit url. `committed: false` means the timeout elapsed
+// first. This function does not itself guarantee the committed url equals
+// the requested one -- a server-side redirect can commit to a different
+// url than msg.url; see the caller's url-field documentation.
+//
+// createTab() rejecting (e.g. Firefox refusing certain data:/javascript:
+// URLs outright) propagates unchanged after cleaning up the listener/timer
+// -- this function only wraps the waiting, not tab-creation error handling.
+async function createTabAndWaitForCommit(createTab, timeoutMs = 3000) {
+  let settled = false;
+  let tabId = null;
+  const pendingCommits = []; // tabIds of frameId-0 commits seen before tabId is known
+
+  let timer;
+  let resolveWait;
+  const waitPromise = new Promise((resolve) => { resolveWait = resolve; });
+
+  const cleanup = () => {
+    try {
+      browser.webNavigation.onCommitted.removeListener(onCommitted);
+    } catch (err) {
+      // removeListener should not throw in normal WebExtension operation;
+      // swallow so a surprising failure here can't leave the wait
+      // unresolved forever.
+    }
+    clearTimeout(timer);
+  };
+
+  const finish = (committed) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    resolveWait(committed);
+  };
+
+  const onCommitted = (details) => {
+    if (details.frameId !== 0) return;
+    if (tabId === null) {
+      pendingCommits.push(details.tabId);
+      return;
+    }
+    if (details.tabId === tabId) finish(true);
+  };
+
+  browser.webNavigation.onCommitted.addListener(onCommitted);
+  timer = setTimeout(() => finish(false), timeoutMs);
+
+  let tab;
+  try {
+    tab = await createTab();
+  } catch (err) {
+    // Route through finish(false), not a bare cleanup() call -- keeps
+    // cleanup reachable through exactly one settled-guarded path even in
+    // the (harmless but possible) case where the timeout already fired
+    // while createTab() was still pending. finish() is a no-op if already
+    // settled, so this is always safe to call here.
+    finish(false);
+    throw err; // tab creation itself failed -- nothing to wait for
+  }
+  tabId = tab.id;
+  if (pendingCommits.includes(tabId)) finish(true);
+
+  const committed = await waitPromise;
+  return { tab, committed };
+}
+
 async function handleAcquireTab(msg) {
   const sessionId = msg.sessionId;
   if (msg.tabId != null && msg.cookieStoreId != null) {
     return { ok: false, error: 'cookie_store_requires_new_tab' };
   }
   let tab;
+  let urlPending = false;
   if (msg.tabId != null) {
     const owner = leaseOwner.get(msg.tabId);
     if (owner && owner !== sessionId) return { ok: false, error: 'conflict' };
@@ -342,15 +428,33 @@ async function handleAcquireTab(msg) {
     }
     const policy = await policyCheck(url, sessionId);
     if (!policy.allowed) return { ok: false, error: policy.error };
-    tab = msg.cookieStoreId != null
-      ? await browser.tabs.create({ url, cookieStoreId: msg.cookieStoreId })
-      : await browser.tabs.create({ url });
+    // Explicit about:blank behaves the same as the default -- there's no
+    // real destination to wait for either way.
+    const shouldWaitForCommit = Boolean(msg.url) && msg.url !== 'about:blank';
+    const createTab = () =>
+      msg.cookieStoreId != null
+        ? browser.tabs.create({ url, cookieStoreId: msg.cookieStoreId })
+        : browser.tabs.create({ url });
+
+    if (shouldWaitForCommit) {
+      const result = await createTabAndWaitForCommit(createTab);
+      tab = result.committed ? await browser.tabs.get(result.tab.id) : result.tab;
+      urlPending = !result.committed;
+    } else {
+      tab = await createTab();
+    }
   }
   if (leaseOwner.get(tab.id) && leaseOwner.get(tab.id) !== sessionId) {
     return { ok: false, error: 'conflict' };
   }
   leaseOwner.set(tab.id, sessionId);
-  return { ok: true, tabId: tab.id, url: tab.url, cookieStoreId: tab.cookieStoreId };
+  return {
+    ok: true,
+    tabId: tab.id,
+    url: tab.url,
+    cookieStoreId: tab.cookieStoreId,
+    ...(urlPending ? { urlPending: true } : {}),
+  };
 }
 
 function handleReleaseTab(msg) {
