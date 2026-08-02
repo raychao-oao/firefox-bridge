@@ -57,6 +57,16 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] Visit a URL on a blacklisted hostname (from the options page blacklist), then `search_history` for it — confirm the result DOES appear (this is the deliberate no-filtering design, not a bug — this check exists to catch a future accidental regression toward filtering)
 - [ ] `search_history` does NOT trigger the blacklist confirmation popup, even when results include a blacklisted site — confirms it truly bypasses `privilegedGate()`
 
+## Bookmarks
+- [ ] `add_bookmark` on a new URL (with `title` and a new `folder`) succeeds; returned fields (`id`/`url`/`title`/`folder`/`folderCreated`) are correct and `folderCreated` is `true`
+- [ ] `add_bookmark` again with the same `folder` (different URL) reuses the folder instead of creating a duplicate — `folderCreated` is `false`, and only one folder with that name exists in the Firefox bookmarks manager
+- [ ] `add_bookmark` with a multi-level `folder` (e.g. `"A/B"`) creates a real nested folder structure, visible in the Firefox bookmarks manager
+- [ ] `add_bookmark` on an already-bookmarked URL (non-private address) returns `duplicate: true` and does NOT create a new bookmark (count in the bookmarks manager doesn't change)
+- [ ] `add_bookmark` on an already-bookmarked URL, passing a brand-new `folder` parameter, still returns `duplicate: true` — and that new folder is NOT created (verifies dedup happens before folder resolution)
+- [ ] `add_bookmark` on a private-network URL (e.g. `http://192.168.1.1/`) called twice with different `title`s both succeed — not blocked by dedup, two separate bookmarks appear
+- [ ] `add_bookmark` on a private-network URL with `title` left empty (or equal to the URL) returns a `titleWarning`, and the bookmark is still created successfully (not blocked)
+- [ ] A blacklisted site's bookmark still appears via `list_bookmarks`/`search_bookmarks` with zero filtering (once those tools exist — see Task 3's checklist items)
+
 ## Policy gate / blacklist
 - [ ] Pasting a full URL (e.g. `https://www.example.com/`) into the options page's hostname field gets normalized to a bare hostname (`www.example.com`) before being stored/listed — not silently stored as-is
 - [ ] Pasting something that isn't a valid hostname (e.g. empty after stripping, or garbage input) shows an inline error and does NOT get added to the list

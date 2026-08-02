@@ -189,6 +189,19 @@ export function registerTools(server, bridgeClient) {
       return toolResult(result);
     }
   );
+
+  server.registerTool(
+    'add_bookmark',
+    {
+      description:
+        'Add a Firefox bookmark. `folder` supports multi-level paths (e.g. "Tech/AI") — case/whitespace-insensitive segment matching, missing segments are created automatically. Before choosing a folder, prefer calling `list_bookmarks` first and reusing an existing folder that already fits, rather than creating a near-duplicate with a slightly different name (e.g. "Read Later" vs "稍後閱讀" vs "Reading List"). Write a concise, human-scannable `title` — do not copy the page\'s raw <title> verbatim (site-name suffixes and taglines make for a bad bookmark list). For private/LAN addresses (192.168.x.x, 10.x.x.x, localhost, etc.), the same URL can point at a different physical device at different times — `title` MUST identify which one (e.g. "Netgear router — home", not just "Router Login"). Deduplicates by exact URL match (skipped for private/LAN addresses, where the same URL can legitimately be a different device) — if a duplicate exists, no new bookmark is created and the response reports `duplicate: true` with the existing entry\'s real location.',
+      inputSchema: { url: z.string(), title: z.string(), folder: z.string().optional() },
+    },
+    async ({ url, title, folder }) => {
+      const result = await bridgeClient.call({ type: 'add_bookmark', url, title, folder });
+      return toolResult(result);
+    }
+  );
 }
 
 function toolResult(result) {

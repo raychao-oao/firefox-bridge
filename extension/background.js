@@ -262,6 +262,8 @@ async function handleNativeMessage(msg) {
         return respond(await handleListTabs());
       case 'search_history':
         return respond(await handleSearchHistory(msg));
+      case 'add_bookmark':
+        return respond(await handleAddBookmark(msg));
       case 'click':
       case 'type':
       case 'read_page':
@@ -362,6 +364,126 @@ async function handleSearchHistory(msg) {
       lastVisitTime: item.lastVisitTime,
     })),
   };
+}
+
+const BOOKMARKS_ROOT_IDS = new Set(['toolbar_____', 'menu________', 'unfiled_____', 'mobile______']);
+const DEFAULT_BOOKMARKS_PARENT_ID = 'unfiled_____'; // "Other Bookmarks" — stable across Firefox versions
+
+async function getDefaultBookmarksParentId() {
+  // Throws (caught by handleNativeMessage's try/catch, becomes a structured
+  // {ok:false, error} response) if this Firefox version doesn't have the
+  // expected root id — see design spec's "固定的預設父節點" section.
+  await browser.bookmarks.get(DEFAULT_BOOKMARKS_PARENT_ID);
+  return DEFAULT_BOOKMARKS_PARENT_ID;
+}
+
+// Walks `segments` (already parsed/trimmed by parseFolderPath) one level at
+// a time from the default root. With create:true, missing segments are
+// created (used by add_bookmark). With create:false, returns null the
+// moment a segment isn't found (used by list_bookmarks, which must not
+// create folders just by listing them).
+async function walkFolderPath(segments, { create }) {
+  let parentId = await getDefaultBookmarksParentId();
+  let created = false;
+  for (const segment of segments) {
+    const children = await browser.bookmarks.getChildren(parentId);
+    const matches = children
+      .filter((child) => child.type === 'folder' && child.title.trim().toLowerCase() === segment.toLowerCase())
+      .sort((a, b) => a.dateAdded - b.dateAdded);
+    if (matches.length > 0) {
+      parentId = matches[0].id;
+    } else if (create) {
+      const folder = await browser.bookmarks.create({ parentId, title: segment });
+      parentId = folder.id;
+      created = true;
+    } else {
+      return null;
+    }
+  }
+  return { parentId, created };
+}
+
+// Walks UP from a node's parentId to reconstruct its full folder path
+// string (e.g. "Tech/AI"), stopping at one of the four special root ids
+// (not included in the path). Used for list_bookmarks/search_bookmarks
+// results and for add_bookmark's duplicate response, where the caller
+// needs to know where an EXISTING bookmark actually lives.
+async function getFolderPathString(parentId) {
+  const titles = [];
+  let currentId = parentId;
+  while (currentId && !BOOKMARKS_ROOT_IDS.has(currentId)) {
+    const [node] = await browser.bookmarks.get(currentId);
+    titles.unshift(node.title);
+    currentId = node.parentId;
+  }
+  return titles.join('/');
+}
+
+async function toBookmarkResult(node) {
+  return {
+    id: node.id,
+    url: node.url,
+    title: node.title,
+    folder: await getFolderPathString(node.parentId),
+  };
+}
+
+// Exact-string-equality dedup — see design spec's "Dedup 判斷範圍" section
+// for why no URL normalization is done here.
+async function findExactUrlDuplicate(url) {
+  const matches = (await browser.bookmarks.search({ url }))
+    .filter((node) => node.type === 'bookmark' && node.url === url)
+    .sort((a, b) => a.dateAdded - b.dateAdded);
+  return matches.length > 0 ? matches[0] : null;
+}
+
+async function handleAddBookmark(msg) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(msg.url);
+  } catch {
+    return { ok: false, error: 'invalid_url' };
+  }
+  const hostname = parsedUrl.hostname;
+  const isPrivate = isPrivateAddress(hostname);
+
+  // Private/LAN addresses skip dedup entirely: the same URL can legitimately
+  // be a different physical device at different times (see design spec's
+  // "Private/LAN 網址的特殊處理" section) — treating it as a stable identity
+  // key would be the same mistake password-manager autofill makes on
+  // shared-IP origins.
+  if (!isPrivate) {
+    const existing = await findExactUrlDuplicate(msg.url);
+    if (existing) {
+      return {
+        ok: true,
+        duplicate: true,
+        id: existing.id,
+        url: existing.url,
+        title: existing.title,
+        folder: await getFolderPathString(existing.parentId),
+        folderCreated: false,
+      };
+    }
+  }
+
+  const segments = parseFolderPath(msg.folder);
+  const { parentId, created } = await walkFolderPath(segments, { create: true });
+  const node = await browser.bookmarks.create({ parentId, title: msg.title, url: msg.url });
+
+  const result = {
+    ok: true,
+    id: node.id,
+    url: node.url,
+    title: node.title,
+    folder: segments.join('/'),
+    folderCreated: created,
+  };
+  if (isPrivate && needsTitleWarning(msg.title, msg.url, hostname)) {
+    result.titleWarning =
+      "private-network address needs an identifying title (device/location/purpose) — the IP alone won't be distinguishable later";
+  }
+  return result;
 }
 
 async function handleScreenshot(msg, respond) {

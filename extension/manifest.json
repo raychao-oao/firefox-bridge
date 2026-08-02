@@ -19,12 +19,13 @@
     "webNavigation",
     "webRequest",
     "history",
+    "bookmarks",
     "storage",
     "scripting",
     "<all_urls>"
   ],
   "background": {
-    "scripts": ["policy-gate.js", "background.js"],
+    "scripts": ["policy-gate.js", "bookmark-helpers.js", "background.js"],
     "persistent": true
   },
   "content_scripts": [
