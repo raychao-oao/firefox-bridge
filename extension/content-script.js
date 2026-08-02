@@ -148,7 +148,7 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       // (click/type only ever target things a user could actually interact
       // with).
       const CANDIDATE_SELECTOR =
-        'a, button, input, select, textarea, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"], summary';
+        'a, button, input, select, textarea, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"], summary, tr, th';
       // Caps the response well under the 1 MiB native-messaging frame limit
       // even on a link-heavy page; excess candidates are dropped, not
       // paginated -- MVP scope, revisit if this proves too small in practice.
