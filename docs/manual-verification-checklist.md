@@ -79,6 +79,23 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `list_elements` on a custom checkbox built as `<div role="checkbox" aria-checked="true">` (no native `<input>`) — the element now appears in the results at all (regression guard: `CANDIDATE_SELECTOR` previously never matched `role="checkbox"`/`role="radio"`/`role="switch"`, so `state.ariaChecked` was documented but unreachable), and `state.ariaChecked === "true"`
 - [ ] Same check with `role="radio"` and `role="switch"` elements — both now appear in `list_elements` results
 
+### Filter and domEpoch
+- [ ] `list_elements({filter: {text: '<某個已知元素的 label 子字串>'}})`，確認只回傳 label 包含該子字串的元素（大小寫不敏感——用一個大小寫不同的子字串再測一次）
+- [ ] `list_elements({filter: {text: '<一個只出現在某元素 label 第 100 個字元之後的子字串，需要構造一個 label 很長的測試元素>'}})`，確認該元素被正確匹配到——驗證 filter 比對的是完整 label，不是已經截斷成 100 字元的 `text` 欄位
+- [ ] `list_elements({filter: {tag: 'input', type: 'checkbox'}})`，確認只回傳 checkbox 類型的 input，其他 tag/type 都被排除
+- [ ] `list_elements({filter: {container: '<一個已知只包含少數幾個元素的容器 selector>'}})`，確認只回傳該容器底下的元素，容器外的元素（即使同樣符合 `CANDIDATE_SELECTOR`）不出現；如果容器元素本身也符合 `CANDIDATE_SELECTOR`（例如容器剛好是個 `<a>`），確認容器本身不算在結果裡，只有它「底下」的子孫算
+- [ ] `list_elements({filter: {container: '<一個合法 CSS 語法、但確定目前頁面上不存在的 selector，例如 "#definitely-not-here">'}})`，確認回傳 `{ok: true, elements: []}`，不是錯誤
+- [ ] `list_elements({filter: {container: '<一個語法上就不合法的 CSS selector，例如 ">>>invalid<<<">'}})`，確認回傳結構化的 `{ok: false, error: 'invalid_container_selector'}`，不是未處理的例外或讓整個呼叫掛掉
+- [ ] 在一個候選元素數量明顯超過 300 的頁面，用 `filter` 縮小到一個已知在候選清單「後段」的元素（不加 filter 時會被 300 上限砍掉），確認加了 filter 後這個元素出現在結果裡——驗證 filter 是在候選階段生效、且在 `MAX_ELEMENTS` 判斷之前
+- [ ] 同一個 `list_elements` 呼叫兩次（沒有中間發生導覽），確認兩次回傳的 `domEpoch` 相同
+- [ ] 呼叫 `list_elements` → `navigate` 到另一個網址 → 再呼叫 `list_elements`，確認前後兩次 `domEpoch` 不同
+- [ ] 在一個有 iframe 的頁面上呼叫 `list_elements`（不傳 `frameId`，多 frame 聚合模式），確認每個 frame 各自回傳自己的 `domEpoch`，而且彼此不同
+- [ ] 對一個頁面呼叫 `list_elements` 拿到 `domEpoch`，在該分頁上用瀏覽器的「上一頁」導覽出去再導覽回來（觸發 bfcache 復原，不是重新整理），確認 `domEpoch` 有換新值
+- [ ] 用第一次 `list_elements` 拿到的 `domEpoch`（連同某個 selector）在 `navigate` 之後呼叫 `click({selector, expectedDomEpoch: <舊值>, frameId: <對應的 frameId>})`，確認回傳 `stale_selector`，且對應元素**沒有**被點擊到
+- [ ] 同樣情境但呼叫 `click({selector})`（不傳 `expectedDomEpoch`），確認行為跟修改前一致（不會是 `stale_selector`）
+- [ ] 用當下正確的 `domEpoch` 呼叫 `click({selector, expectedDomEpoch: <正確值>, frameId: <對應的 frameId>})`，確認正常執行，不被誤判成 stale
+- [ ] `type` 比照上面兩項 `click` 的測試（正確 epoch 正常執行、錯誤 epoch 回傳 `stale_selector` 且不設值）
+
 ### Frames (`content_scripts` is `all_frames: true`)
 - [ ] `list_frames` on a page with no iframes returns exactly one frame (`frameId: 0`)
 - [ ] `list_frames` on a page with a nested `<iframe><iframe>...` returns every frame with correct `parentFrameId` chains
