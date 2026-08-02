@@ -8,8 +8,12 @@
 // Requires AMO_API_KEY and AMO_API_SECRET in the environment (from
 // https://addons.mozilla.org/en-US/developers/addon/api/key/). Deliberately
 // read from env, never accepted as a CLI argument, so the credentials don't
-// end up in shell history or process listings.
+// end up in shell history or process listings. A repo-root .env (gitignored)
+// with AMO_API_KEY=... / AMO_API_SECRET=... lines is loaded automatically if
+// present, as a convenience alternative to exporting them every session --
+// real environment variables always take precedence over .env values.
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,16 +22,39 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const EXTENSION_DIR = path.join(REPO_ROOT, 'extension');
 const ARTIFACTS_DIR = path.join(REPO_ROOT, 'dist');
 
+loadDotEnv(path.join(REPO_ROOT, '.env'));
+
+function loadDotEnv(envPath) {
+  let content;
+  try {
+    content = readFileSync(envPath, 'utf8');
+  } catch {
+    return; // no .env file -- fine, env vars may already be set
+  }
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
 const apiKey = process.env.AMO_API_KEY;
 const apiSecret = process.env.AMO_API_SECRET;
 
 if (!apiKey || !apiSecret) {
   console.error(
     'Missing AMO_API_KEY / AMO_API_SECRET in the environment.\n' +
-    'Get a key pair from https://addons.mozilla.org/en-US/developers/addon/api/key/ ' +
-    'and export both before running this script:\n' +
+    'Get a key pair from https://addons.mozilla.org/en-US/developers/addon/api/key/, ' +
+    'then either export both before running this script:\n' +
     '  export AMO_API_KEY="..."\n' +
-    '  export AMO_API_SECRET="..."'
+    '  export AMO_API_SECRET="..."\n' +
+    'or put them in a repo-root .env file (gitignored, loaded automatically):\n' +
+    '  AMO_API_KEY=...\n' +
+    '  AMO_API_SECRET=...'
   );
   process.exit(1);
 }

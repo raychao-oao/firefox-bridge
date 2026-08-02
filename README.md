@@ -58,12 +58,15 @@ From File...". This installs permanently (survives restarts) — unlike loading
 every time it restarts.
 
 To build and sign your own `.xpi` from source: get an API key/secret from
-[AMO](https://addons.mozilla.org/en-US/developers/addon/api/key/), then run
+[AMO](https://addons.mozilla.org/en-US/developers/addon/api/key/), then either export them and
+run
 ```
 AMO_API_KEY=... AMO_API_SECRET=... npm run sign
 ```
-(equivalent to `node scripts/sign-extension.js` directly — `npm run sign` is just shorter to
-remember/re-run after each change to `extension/`.)
+or put them in a repo-root `.env` file (already gitignored) — `AMO_API_KEY=...` /
+`AMO_API_SECRET=...`, one per line — and just run `npm run sign`; the script loads `.env`
+automatically if present. (`npm run sign` is equivalent to `node scripts/sign-extension.js`
+directly, just shorter to remember/re-run after each change to `extension/`.)
 
 ### 2. Native messaging host
 
