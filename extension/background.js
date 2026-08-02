@@ -399,6 +399,7 @@ async function handleListTabs() {
       url: t.url,
       title: t.title,
       leasedBy: leaseOwner.get(t.id) || null,
+      cookieStoreId: t.cookieStoreId,
     })),
   };
 }

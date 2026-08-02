@@ -169,7 +169,8 @@ export function registerTools(server, bridgeClient) {
   server.registerTool(
     'list_tabs',
     {
-      description: 'List all open Firefox tabs (id, url, title) and which are currently leased.',
+      description:
+        'List all open Firefox tabs (id, url, title, cookieStoreId) and which are currently leased. `cookieStoreId` identifies which Multi-Account Container (if any) the tab belongs to — see `list_containers`.',
       inputSchema: {},
     },
     async () => {

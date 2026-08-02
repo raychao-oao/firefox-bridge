@@ -90,6 +90,19 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] Called with a nonexistent/already-deleted `id` — returns a structured error, not a hang or unhandled exception
 - [ ] Moving a bookmark that was sitting directly in Other Bookmarks (not in any sub-folder) reports `from: ""` (the established unprefixed-default-root convention used elsewhere in this tool set — see `list_bookmarks`), not `"Other Bookmarks"` or any other string — this is expected, not a bug
 
+## Multi-Account Containers
+- [ ] `list_containers()` returns a `containers` array matching what's shown in Firefox's `about:preferences#general` → Tab Containers section (name/color/icon for each)
+- [ ] `create_container({name, color, icon})` with valid values creates a real new container visible in Firefox, and the returned `cookieStoreId` is usable in a later `acquire_tab` call
+- [ ] `create_container` with an unsupported `color` or `icon` value returns `{ok: false, error: ...}` with Firefox's own rejection message, not a silent success or an unhandled exception
+- [ ] Creating two containers with the same `name` succeeds both times, with two different `cookieStoreId` values (verifies the deliberate no-dedup-by-name decision)
+- [ ] `acquire_tab({cookieStoreId})` (no `url`) opens a new `about:blank` tab that visually belongs to that container, and the response's `cookieStoreId` matches
+- [ ] `acquire_tab({cookieStoreId, url})` opens a new tab at that URL that also belongs to that container — both conditions hold at once, not just one
+- [ ] `acquire_tab({tabId, cookieStoreId})` together (any values) returns `cookie_store_requires_new_tab`, not a silently-ignored parameter
+- [ ] `acquire_tab({cookieStoreId: "<random nonexistent string>"})` returns `container_not_found`, not an unhandled exception or a tab opened in the default container
+- [ ] `acquire_tab({cookieStoreId: "firefox-default"})` (a reserved, non-container Firefox store id) also returns `container_not_found` — this is a distinct check from the random-string case above, confirming reserved stores aren't mistaken for real containers
+- [ ] Manually open a tab inside a container in Firefox's UI, then `acquire_tab({tabId})` (no `cookieStoreId`) to lease it — confirm the response's `cookieStoreId` correctly reflects that tab's actual container, not just the "open new tab" path
+- [ ] `list_tabs()` reports the correct `cookieStoreId` for every open tab, including ordinary (non-container) tabs, which should report Firefox's default store id (e.g. `firefox-default`)
+
 ## Policy gate / blacklist
 - [ ] Pasting a full URL (e.g. `https://www.example.com/`) into the options page's hostname field gets normalized to a bare hostname (`www.example.com`) before being stored/listed — not silently stored as-is
 - [ ] Pasting something that isn't a valid hostname (e.g. empty after stripping, or garbage input) shows an inline error and does NOT get added to the list
