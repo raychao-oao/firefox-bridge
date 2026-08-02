@@ -826,6 +826,15 @@ async function handleClick(msg) {
   // ordinary, non-blocked click doesn't get misread as dialogOpened just
   // because the response arrived a few ms late.
   const CLICK_TIMEOUT_MS = 600;
+  // Known limitation of sendToFrame's retry-and-reinject logic: if a click
+  // triggers a navigation and the original browser.tabs.sendMessage inside
+  // sendToFrame rejects due to the frame's document tearing down mid-flight,
+  // sendToFrame will inject the content script into the NEW document and
+  // resend the same click message. This could potentially trigger el.click()
+  // a second time against whatever now matches msg.selector in the new
+  // document. This is pre-existing behavior (not a regression introduced here)
+  // and is accepted as a known limitation — not fixed in this task.
+  //
   // .catch(() => null) is defensive, not currently load-bearing: sendToFrame
   // already catches its own send/inject/retry failures internally and
   // resolves to {ok: false, error} rather than rejecting. This guards
