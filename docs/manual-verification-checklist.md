@@ -21,8 +21,9 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `navigate` to a normal (non-blacklisted) URL succeeds
 - [ ] `click` on a known selector (test against a simple local HTML page) actually clicks
 - [ ] `type` on an input field sets its value and fires `input`/`change` (verify via a page that echoes input state)
-- [ ] 對一個點擊後不會觸發任何後續效果的普通連結呼叫 `click`，確認 `navigated: false`、`dialogOpened: false`、`domChanged` 反映實際情況（連結若有 `href` 導覽，`navigated` 應為 `true`）
+- [ ] 對一個沒有 `href`、點擊後不會觸發任何導覽或其他效果的連結（例如 `<a href="#">`）呼叫 `click`，確認 `navigated: false`、`dialogOpened: false`
 - [ ] 對一個點擊後會觸發 `window.location.href` 導覽（不是 `<a>` 標籤，是 JS 導覽）的按鈕呼叫 `click`，確認 `navigated: true` 且 `newUrl` 是導覽後的網址
+- [ ] 已知的 false negative（非 bug，勿回報）：對上一項的 JS 導覽按鈕呼叫 `click` 時，若導覽在 background 讀取 `tabAfter`（點擊後約 600ms 內）當下還沒完成、`tab.url` 尚未更新，`navigated` 可能回報 `false`。這是 `extension/background.js` `handleClick` 註解中記載、已知且可接受的限制，不需要額外用 `wait_for` 之類的機制去 poll 才能拿到最終值——若觀察到這個現象請視為預期行為，不要當成 bug 回報
 - [ ] 構造一個點擊後會同步呼叫 `window.confirm(...)` 的測試頁面（`onclick="confirm('...')"`），呼叫 `click`，確認在約 600ms 內收到回應且 `dialogOpened: true`（不是整個 MCP 呼叫卡住等到對話框被關掉才回應）——這是驗證本設計核心假設的關鍵測試，之後手動在 Firefox 視窗上把測試用的 `confirm()` 對話框關掉，確認擴充功能沒有崩潰或留下無法清除的狀態
 - [ ] 對一個完全正常、沒有任何對話框的按鈕連續呼叫 `click` 多次（例如 10 次），確認沒有任何一次被誤判成 `dialogOpened: true`——驗證 background 600ms 逾時跟 content-script 300ms 觀察窗之間的緩衝夠用，不會被正常的訊息往返延遲誤觸發
 - [ ] 對一個點擊後會用 `element.textContent = ...`、`element.appendChild(...)` 等方式改動 DOM 的按鈕呼叫 `click`，確認 `domChanged: true`

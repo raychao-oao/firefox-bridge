@@ -41,11 +41,17 @@ you're already using, logged into whatever you're logged into.
 `navigate`, `click`, `type`, `read_page`, `list_elements`, `list_frames`, `screenshot`,
 `start_console`/`get_console`, `start_network`/`get_network`, `acquire_tab`/`release_tab`,
 `list_tabs`, `search_history`, `add_bookmark`, `list_bookmarks`, `search_bookmarks`,
-`move_to_pending_deletion`, `list_containers`, `create_container`.
+`move_to_pending_deletion`, `list_containers`, `create_container`, `wait_for`.
 
 `list_elements` discovers real CSS selectors for interactive elements instead of guessing
 blindly — each one is guaranteed to match exactly the inspected element on a follow-up
 `click`/`type`.
+
+`click` returns an effect summary (`navigated`, `dialogOpened`, `domChanged`, `newUrl`) so
+an agent can tell what happened without a separate `read_page` round-trip. `ok: true` only
+means the click event was dispatched — it is not a guarantee that the effect you expected
+actually happened (e.g. a JS-initiated navigation may not be reflected in `navigated` yet;
+see `wait_for` for polling a page to a target state).
 
 ## Install
 

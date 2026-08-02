@@ -45,7 +45,15 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       // spec's own framing.
       let domChanged = false;
       const observer = new MutationObserver(() => { domChanged = true; });
-      observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+      // document.body can be null (e.g. a standalone XML/SVG document, or an
+      // element matched inside <head>) -- same guard as read_page's
+      // `document.body ? ... : ''` above. Without it, observer.observe(null,
+      // ...) throws and click fails outright where el.click() alone would
+      // have worked. On a null body there's nothing to observe, so
+      // domChanged honestly stays false.
+      if (document.body) {
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+      }
       el.click();
       return new Promise((resolve) => {
         setTimeout(() => {
