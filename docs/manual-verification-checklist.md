@@ -29,6 +29,22 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] A tool call against a Firefox session-restore tab that hasn't been visited yet (e.g. right after a Firefox restart, before clicking into the tab) returns `tab_not_loaded`, not a generic injection-failure error
 - [ ] `type` against a `<select>` sets the option matching `text` (by `value`, falling back to visible text) and fires `change` — verify against a real multi-option dropdown, not just a text input
 - [ ] `list_elements` on a `<select>` includes an `options: [{value, text}]` array matching the page's real `<option>` list
+- [ ] `list_elements` on a known-checked and a known-unchecked checkbox reports `state.checked` as `true`/`false` matching what Firefox actually shows
+- [ ] Same check for radio buttons (a selected one and an unselected one) — tested independently, not assumed covered by the checkbox case
+- [ ] `list_elements` on a text input with pre-filled text reports `state.value` matching the displayed text
+- [ ] `list_elements` on a `type="password"` field with a real value (typed, or autofilled by Firefox's password manager) has NO `value` key in `state` at all — not an empty string, the key itself is absent
+- [ ] Same check with `type="PASSWORD"` (uppercase) — confirms the case-insensitive type check fix; `state.value` is still absent and the `text` label also doesn't leak the value
+- [ ] `list_elements` on a `type="hidden"` field with a value has no `state.value` key
+- [ ] `list_elements` on a `type="file"` input has no `state.value` key
+- [ ] `list_elements` on a disabled button/field reports `state.disabled === true`; the same element type enabled reports `state.disabled === false` (always an explicit boolean when the element type applies, never omitted for being `false`)
+- [ ] An `input` inside a `<fieldset disabled>` also reports `state.disabled === true` (this falls out of `el.disabled` for free — no special-case code needed, just confirm it actually happens)
+- [ ] A readonly text input and a readonly textarea both report `state.readonly === true`
+- [ ] A checkbox (where `readonly` has no meaning) has no `readonly` key in `state` at all — confirms the scope restriction to text-like input types
+- [ ] An element with `aria-expanded="true"` reports `state.ariaExpanded === "true"` (string); after it collapses, a fresh call reports `"false"`; an element with no `aria-expanded` attribute at all has no `ariaExpanded` key (not the string `"false"`)
+- [ ] An element with `aria-checked="mixed"` (e.g. a partially-selected tree node) reports `state.ariaChecked === "mixed"` verbatim — not coerced to `true` or `false`
+- [ ] A `<select>`'s `state.value` matches its currently-selected `<option>`'s value and is consistent with the existing `options` array; after using `type` to change the selection, a fresh `list_elements` call reflects the new value
+- [ ] A plain `<a>` link (no form semantics, no relevant ARIA attributes) has `state: {}` — present as an empty object, not an exception and not a missing `state` field entirely
+- [ ] On a page with iframes, calling `list_elements` without `frameId` (multi-frame aggregation mode) — every element in every frame's entry still carries a correct `state` object, not dropped or overwritten during aggregation
 
 ### Frames (`content_scripts` is `all_frames: true`)
 - [ ] `list_frames` on a page with no iframes returns exactly one frame (`frameId: 0`)
