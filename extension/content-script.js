@@ -126,6 +126,30 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       return Promise.resolve({ ok: true });
     }
 
+    if (msg.type === 'hover') {
+      let el;
+      try {
+        el = document.querySelector(msg.selector);
+      } catch (err) {
+        return Promise.resolve({ ok: false, error: 'invalid_selector' });
+      }
+      if (!el) return Promise.resolve({ ok: false, error: 'element_not_found' });
+      // Both MouseEvent AND PointerEvent variants: some components (especially
+      // ones also supporting touch) listen for pointerover/pointerenter/
+      // pointermove instead of the legacy mouse events -- dispatching only
+      // one family would silently miss the other. mouseenter/pointerenter do
+      // NOT bubble per spec, dispatched directly on the target either way.
+      const bubblingInit = { bubbles: true, cancelable: true, view: window };
+      const enterInit = { bubbles: false, cancelable: false, view: window };
+      el.dispatchEvent(new PointerEvent('pointerover', bubblingInit));
+      el.dispatchEvent(new MouseEvent('mouseover', bubblingInit));
+      el.dispatchEvent(new PointerEvent('pointerenter', enterInit));
+      el.dispatchEvent(new MouseEvent('mouseenter', enterInit));
+      el.dispatchEvent(new PointerEvent('pointermove', bubblingInit));
+      el.dispatchEvent(new MouseEvent('mousemove', bubblingInit));
+      return Promise.resolve({ ok: true });
+    }
+
     if (msg.type === 'read_page') {
       // Truncated so a huge page can't produce a response that blows past the
       // 1 MiB native-messaging cap on the extension -> host hop.

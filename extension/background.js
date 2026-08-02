@@ -291,6 +291,8 @@ async function handleNativeMessage(msg) {
         return respond(await forwardToContentScript(msg));
       case 'press_key':
         return respond(await forwardToContentScript(msg));
+      case 'hover':
+        return respond(await forwardToContentScript(msg));
       case 'wait_for':
         return respond(await handleWaitFor(msg));
       case 'list_frames':
@@ -1198,6 +1200,14 @@ async function forwardToContentScript(msg) {
   // different design (waiting on multiple frames simultaneously), not in
   // scope for this batch.
   if (msg.type === 'type') {
+    if (msg.frameId != null) {
+      const gate = await privilegedGate(msg, { frameId: msg.frameId });
+      if (!gate.ok) return gate;
+      return sendToFrame(msg.tabId, msg.frameId, msg);
+    }
+    return searchFramesForResult(msg, (frameId) => sendToFrame(msg.tabId, frameId, msg));
+  }
+  if (msg.type === 'hover') {
     if (msg.frameId != null) {
       const gate = await privilegedGate(msg, { frameId: msg.frameId });
       if (!gate.ok) return gate;

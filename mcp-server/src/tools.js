@@ -67,6 +67,19 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'hover',
+    {
+      description:
+        "Dispatch pointerover/mouseover, pointerenter/mouseenter, and pointermove/mousemove events on an element in a leased tab, identified by a CSS selector -- useful for triggering JS-driven dropdown/tooltip components. Pass `frameId` to target a specific frame; omit it for the same frame-fallback search as `click`/`type`. IMPORTANT: this does NOT set the CSS `:hover` pseudo-class -- that's determined by the browser's internal pointer hit-testing based on the REAL cursor position, which this tool (and this whole project, by design) never moves. A component whose hover behavior is pure CSS (`:hover { display: block }`) will NOT respond to this tool; only components with JS listeners bound to the dispatched event types will. Returns `element_not_found` if the selector is valid but matches nothing, `invalid_selector` if the selector itself has a CSS syntax error.",
+      inputSchema: { tabId: z.number(), selector: z.string(), frameId: z.number().optional() },
+    },
+    async ({ tabId, selector, frameId }) => {
+      const result = await bridgeClient.call({ type: 'hover', tabId, selector, frameId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'read_page',
     {
       description:
