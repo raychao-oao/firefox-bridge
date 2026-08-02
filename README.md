@@ -107,13 +107,13 @@ manual checklist to run through after changes there.
   the bookmark-cleanup design spec)
 - Multi-Account Container support (`list_containers`/`create_container`/`acquire_tab`'s
   `cookieStoreId`) is read + create only — there is no tool to delete or modify a container.
+  Deleting a container is deliberately out of scope for now: Firefox's own
+  `contextualIdentities.remove()` does not close the container's open tabs, which would need
+  extra design work this batch didn't need to do (see the containers design spec)
 - `list_containers`/`create_container` aren't policy-gated either — opening a tab inside a
   container via `acquire_tab`'s `cookieStoreId` gives the agent that container's logged-in
   session, and the URL blacklist remains the only control surface; there is no separate
   per-container opt-out
-  Deleting a container is deliberately out of scope for now: Firefox's own
-  `contextualIdentities.remove()` does not close the container's open tabs, which would need
-  extra design work this batch didn't need to do (see the containers design spec)
 - Console/network capture is top-frame only, not frame-aware
 - Text truncation is char-count-based, not byte-based (risk on CJK-heavy pages)
 - WebMCP integration deferred to a future version
