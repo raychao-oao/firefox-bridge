@@ -34,6 +34,13 @@ if (window.__firefoxBridgeContentScriptInstalled) {
     return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   }
 
+  function fbBase64ToBytes(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
   // domEpoch identifies "this DOM instance" -- scoped per content-script
   // execution, i.e. per FRAME (this project's manifest.json has
   // content_scripts.all_frames: true, so an iframe's domEpoch is
@@ -85,6 +92,36 @@ if (window.__firefoxBridgeContentScriptInstalled) {
           resolve({ ok: true, domChanged });
         }, 300);
       });
+    }
+
+    if (msg.type === 'upload_file') {
+      let el;
+      try {
+        el = document.querySelector(msg.selector);
+      } catch (err) {
+        return Promise.resolve({ ok: false, error: 'invalid_selector' });
+      }
+      if (!el) return Promise.resolve({ ok: false, error: 'element_not_found' });
+      // el.type (the IDL attribute), not el.getAttribute('type') -- HTML
+      // input types are case-insensitive (type="FILE" is still a file
+      // input), and el.type already normalizes to lowercase, unlike a raw
+      // getAttribute read. Found by use-codex plan review.
+      if (el.tagName.toLowerCase() !== 'input' || el.type !== 'file') {
+        return Promise.resolve({ ok: false, error: 'not_a_file_input' });
+      }
+      // Standard "assign a File to an <input type=file>" pattern: construct
+      // a DataTransfer, add the File to it, assign its FileList to el.files.
+      // This assignment alone does NOT fire `change` (per spec), so both
+      // change and input are dispatched explicitly afterward.
+      const file = new File([fbBase64ToBytes(msg.dataBase64)], msg.fileName, {
+        type: msg.mimeType || 'application/octet-stream',
+      });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      el.files = dt.files;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return Promise.resolve({ ok: true });
     }
 
     if (msg.type === 'type') {

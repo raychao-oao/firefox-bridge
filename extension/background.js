@@ -287,6 +287,8 @@ async function handleNativeMessage(msg) {
       case 'read_page':
       case 'list_elements':
         return respond(await forwardToContentScript(msg));
+      case 'upload_file':
+        return respond(await forwardToContentScript(msg));
       case 'scroll_to':
         return respond(await forwardToContentScript(msg));
       case 'drag_and_drop':
@@ -1210,6 +1212,14 @@ async function forwardToContentScript(msg) {
     return searchFramesForResult(msg, (frameId) => sendToFrame(msg.tabId, frameId, msg));
   }
   if (msg.type === 'hover') {
+    if (msg.frameId != null) {
+      const gate = await privilegedGate(msg, { frameId: msg.frameId });
+      if (!gate.ok) return gate;
+      return sendToFrame(msg.tabId, msg.frameId, msg);
+    }
+    return searchFramesForResult(msg, (frameId) => sendToFrame(msg.tabId, frameId, msg));
+  }
+  if (msg.type === 'upload_file') {
     if (msg.frameId != null) {
       const gate = await privilegedGate(msg, { frameId: msg.frameId });
       if (!gate.ok) return gate;

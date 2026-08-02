@@ -1,11 +1,23 @@
 // repo/mcp-server/src/tools.js
 import { z } from 'zod';
-import { mkdir, writeFile, rename, unlink } from 'node:fs/promises';
+import { mkdir, writeFile, rename, unlink, stat, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 
 const SCREENSHOT_DIR = path.resolve(os.tmpdir(), 'firefox-bridge-screenshots');
+
+// Raw-file-size fast-check, before even reading the file into memory.
+const MAX_UPLOAD_FILE_BYTES = 700 * 1024;
+// The REAL guarantee: measured against the actual encoded outbound message
+// (JSON + base64, not just the raw file), leaving 4 KiB of headroom under
+// native-host's MAX_MESSAGE_BYTES (1 MiB) for the native-messaging header
+// and the message's other fields (selector, fileName, etc). Checking only
+// the raw file size against MAX_UPLOAD_FILE_BYTES is a fast pre-check, not
+// a mathematical guarantee -- base64 inflates by ~4/3, and an unusually long
+// selector/fileName could still push an otherwise-under-the-cap file over
+// the real limit. Found by use-codex spec review.
+const MAX_ENCODED_UPLOAD_MESSAGE_BYTES = 1024 * 1024 - 4096;
 
 export function registerTools(server, bridgeClient) {
   server.registerTool(
@@ -388,6 +400,56 @@ export function registerTools(server, bridgeClient) {
     },
     async ({ target }) => {
       const result = await bridgeClient.call({ type: 'to_be_deleted', target });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'upload_file',
+    {
+      description:
+        "Upload a local file to a leased tab's <input type=\"file\"> element, identified by a CSS selector. `filePath` is a path on the MACHINE RUNNING THIS MCP SERVER (same trust model as `screenshot` writing files locally) -- the file's bytes are read here and sent through to the page. Pass `frameId` to target a specific frame; omit it for the same frame-fallback search as `click`/`type`. `mimeType` is optional (defaults to `application/octet-stream` if omitted). Fails with `file_too_large` if the file exceeds roughly 700KB (large-file chunking isn't implemented yet), `not_a_file_input` if the selector matches something other than an <input type=\"file\">, `file_read_failed` if `filePath` doesn't exist or can't be read.",
+      inputSchema: {
+        tabId: z.number(),
+        selector: z.string(),
+        filePath: z.string(),
+        frameId: z.number().optional(),
+        mimeType: z.string().optional(),
+      },
+    },
+    async ({ tabId, selector, filePath, frameId, mimeType }) => {
+      let fileStat;
+      try {
+        fileStat = await stat(filePath);
+      } catch (err) {
+        return toolResult({ ok: false, error: `file_read_failed: ${err.message}` });
+      }
+      if (fileStat.size > MAX_UPLOAD_FILE_BYTES) {
+        return toolResult({ ok: false, error: 'file_too_large' });
+      }
+      let bytes;
+      try {
+        bytes = await readFile(filePath);
+      } catch (err) {
+        return toolResult({ ok: false, error: `file_read_failed: ${err.message}` });
+      }
+      const fileName = path.basename(filePath);
+      const outbound = {
+        type: 'upload_file',
+        tabId,
+        selector,
+        frameId,
+        fileName,
+        mimeType,
+        dataBase64: bytes.toString('base64'),
+      };
+      // The real, mathematically-sound check: measure the actual message
+      // that's about to be sent, not just the raw file bytes (see the
+      // MAX_ENCODED_UPLOAD_MESSAGE_BYTES comment above).
+      if (Buffer.byteLength(JSON.stringify(outbound), 'utf8') > MAX_ENCODED_UPLOAD_MESSAGE_BYTES) {
+        return toolResult({ ok: false, error: 'file_too_large' });
+      }
+      const result = await bridgeClient.call(outbound);
       return toolResult(result);
     }
   );
