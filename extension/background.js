@@ -264,6 +264,10 @@ async function handleNativeMessage(msg) {
         return respond(await handleSearchHistory(msg));
       case 'add_bookmark':
         return respond(await handleAddBookmark(msg));
+      case 'list_bookmarks':
+        return respond(await handleListBookmarks(msg));
+      case 'search_bookmarks':
+        return respond(await handleSearchBookmarks(msg));
       case 'click':
       case 'type':
       case 'read_page':
@@ -484,6 +488,47 @@ async function handleAddBookmark(msg) {
       "private-network address needs an identifying title (device/location/purpose) — the IP alone won't be distinguishable later";
   }
   return result;
+}
+
+async function collectBookmarks(node, pathSegments, out) {
+  if (node.type === 'bookmark') {
+    out.push({ id: node.id, url: node.url, title: node.title, folder: pathSegments.join('/') });
+    return;
+  }
+  if (node.children) {
+    // Don't fold the four named root containers (or the single absolute
+    // tree root above them, which has no parentId) into the displayed
+    // path — only real user-created folders count, matching
+    // getFolderPathString's root-stopping behavior.
+    const isRootContainer = BOOKMARKS_ROOT_IDS.has(node.id) || !node.parentId;
+    const nextPath = isRootContainer ? pathSegments : [...pathSegments, node.title];
+    for (const child of node.children) {
+      await collectBookmarks(child, nextPath, out);
+    }
+  }
+}
+
+async function handleListBookmarks(msg) {
+  const segments = parseFolderPath(msg.folder);
+
+  if (segments.length === 0) {
+    const [root] = await browser.bookmarks.getTree();
+    const results = [];
+    await collectBookmarks(root, [], results);
+    return { ok: true, results };
+  }
+
+  const walked = await walkFolderPath(segments, { create: false });
+  if (!walked) return { ok: true, results: [] };
+  const children = await browser.bookmarks.getChildren(walked.parentId);
+  const bookmarks = children.filter((node) => node.type === 'bookmark');
+  return { ok: true, results: await Promise.all(bookmarks.map(toBookmarkResult)) };
+}
+
+async function handleSearchBookmarks(msg) {
+  const matches = await browser.bookmarks.search(msg.query);
+  const bookmarks = matches.filter((node) => node.type === 'bookmark');
+  return { ok: true, results: await Promise.all(bookmarks.map(toBookmarkResult)) };
 }
 
 async function handleScreenshot(msg, respond) {

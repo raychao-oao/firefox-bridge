@@ -66,6 +66,12 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `add_bookmark` on a private-network URL (e.g. `http://192.168.1.1/`) called twice with different `title`s both succeed — not blocked by dedup, two separate bookmarks appear
 - [ ] `add_bookmark` on a private-network URL with `title` left empty (or equal to the URL) returns a `titleWarning`, and the bookmark is still created successfully (not blocked)
 - [ ] A blacklisted site's bookmark still appears via `list_bookmarks`/`search_bookmarks` with zero filtering (once those tools exist — see Task 3's checklist items)
+- [ ] `list_bookmarks()` (no `folder`) lists every bookmark, fields correct, no folder nodes in the results
+- [ ] `list_bookmarks(folder)` returns only that folder's direct bookmarks, not nested sub-folder content
+- [ ] `list_bookmarks(folder)` on a folder that doesn't exist returns `{ok: true, results: []}`, not an error
+- [ ] `search_bookmarks(query)` finds a bookmark by a keyword in its `title`
+- [ ] `search_bookmarks(query)` finds a bookmark by a keyword in its `url`
+- [ ] A blacklisted site's bookmark still appears in both `list_bookmarks` and `search_bookmarks` results (verifies the deliberate no-filtering design, not an oversight)
 
 ## Policy gate / blacklist
 - [ ] Pasting a full URL (e.g. `https://www.example.com/`) into the options page's hostname field gets normalized to a bare hostname (`www.example.com`) before being stored/listed — not silently stored as-is

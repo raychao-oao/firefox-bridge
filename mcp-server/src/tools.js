@@ -202,6 +202,32 @@ export function registerTools(server, bridgeClient) {
       return toolResult(result);
     }
   );
+
+  server.registerTool(
+    'list_bookmarks',
+    {
+      description:
+        'List Firefox bookmarks. Omit `folder` to list every bookmark (flattened across all folders, no result limit). Pass `folder` (supports multi-level paths like "Tech/AI", case/whitespace-insensitive) to list only that folder\'s direct bookmarks — does not include nested sub-folder content. Returns an empty list if the folder doesn\'t exist, not an error.',
+      inputSchema: { folder: z.string().optional() },
+    },
+    async ({ folder }) => {
+      const result = await bridgeClient.call({ type: 'list_bookmarks', folder });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'search_bookmarks',
+    {
+      description:
+        "Search Firefox bookmarks by keyword — matches against both URL and title. Returns every match, no result limit.",
+      inputSchema: { query: z.string() },
+    },
+    async ({ query }) => {
+      const result = await bridgeClient.call({ type: 'search_bookmarks', query });
+      return toolResult(result);
+    }
+  );
 }
 
 function toolResult(result) {
