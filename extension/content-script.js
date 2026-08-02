@@ -34,8 +34,32 @@ if (window.__firefoxBridgeContentScriptInstalled) {
     return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   }
 
+  // domEpoch identifies "this DOM instance" -- scoped per content-script
+  // execution, i.e. per FRAME (this project's manifest.json has
+  // content_scripts.all_frames: true, so an iframe's domEpoch is
+  // independent of its parent's). Generated once at script-install time,
+  // reusing the same random-id generator as data-fb-id, since a fresh
+  // navigation always re-executes this script (the double-injection guard
+  // at the top of this file is what makes that true).
+  //
+  // Rotating on bfcache restoration matters: Firefox can restore a page
+  // from bfcache WITHOUT re-running content-script.js at all -- the exact
+  // same mechanism list_elements' password-exclusion logic elsewhere in
+  // this file already has to account for. event.persisted === true is
+  // Firefox's own signal for "this pageshow came from bfcache, not a fresh
+  // load." Without this listener, a caller's expectedDomEpoch would
+  // incorrectly still match after a back-navigation a user would consider
+  // a real page change.
+  let domEpoch = fbGenerateId();
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) domEpoch = fbGenerateId();
+  });
+
   browser.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
     if (msg.type === 'click') {
+      if (msg.expectedDomEpoch !== undefined && msg.expectedDomEpoch !== domEpoch) {
+        return Promise.resolve({ ok: false, error: 'stale_selector' });
+      }
       const el = document.querySelector(msg.selector);
       if (!el) return Promise.resolve({ ok: false, error: 'element_not_found' });
       // domChanged is a deliberately coarse, best-effort signal (any
@@ -64,6 +88,9 @@ if (window.__firefoxBridgeContentScriptInstalled) {
     }
 
     if (msg.type === 'type') {
+      if (msg.expectedDomEpoch !== undefined && msg.expectedDomEpoch !== domEpoch) {
+        return Promise.resolve({ ok: false, error: 'stale_selector' });
+      }
       const el = document.querySelector(msg.selector);
       if (!el) return Promise.resolve({ ok: false, error: 'element_not_found' });
       el.focus();
@@ -126,7 +153,38 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       // even on a link-heavy page; excess candidates are dropped, not
       // paginated -- MVP scope, revisit if this proves too small in practice.
       const MAX_ELEMENTS = 300;
-      const semanticCandidates = document.querySelectorAll(CANDIDATE_SELECTOR);
+
+      // Empty-string filter fields are treated the same as omitted (no
+      // constraint from that field) -- not rejected, not "match nothing."
+      // A caller passing filter: {text: ''} gets the same result as
+      // omitting filter.text entirely.
+      const filter = msg.filter || {};
+      // scanRoot narrows WHERE the candidate queries run -- container-scoping
+      // happens at the query level (not a post-hoc filter of the final
+      // array) so that a page with 500+ interactive elements doesn't lose a
+      // filtered-for element to the MAX_ELEMENTS cap being consumed by
+      // unrelated, earlier-sorted candidates outside the container.
+      let scanRoot = document;
+      if (filter.container) {
+        let matched;
+        try {
+          matched = document.querySelector(filter.container);
+        } catch (err) {
+          return Promise.resolve({ ok: false, error: 'invalid_container_selector' });
+        }
+        if (!matched) {
+          // Valid selector, legitimately no match right now (e.g. that part
+          // of the page hasn't rendered yet) -- a normal empty result, not
+          // an error. Deliberately distinct from the invalid-selector case
+          // above: a typo'd CSS syntax gets a structured error a caller
+          // can't miss; a selector that's fine but currently matches
+          // nothing gets the same shape as "no candidates here."
+          return Promise.resolve({ ok: true, elements: [], totalCandidates: 0, truncated: false, domEpoch });
+        }
+        scanRoot = matched;
+      }
+
+      const semanticCandidates = scanRoot.querySelectorAll(CANDIDATE_SELECTOR);
       // Some UIs (this Netgear router admin panel included) bind clicks via
       // JS to plain li/span/div with no semantic tag, role, or onclick
       // attribute -- invisible to the selector above. `cursor: pointer` is
@@ -134,13 +192,49 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       // Capped separately so a pathological page can't make this scan itself
       // the bottleneck.
       const HEURISTIC_SCAN_CAP = 3000;
-      const heuristicPool = document.querySelectorAll('li, span, div');
+      const heuristicPool = scanRoot.querySelectorAll('li, span, div');
       const heuristicCandidates = [];
       for (let i = 0; i < heuristicPool.length && i < HEURISTIC_SCAN_CAP; i += 1) {
         const el = heuristicPool[i];
         if (getComputedStyle(el).cursor === 'pointer') heuristicCandidates.push(el);
       }
-      const candidates = [...new Set([...semanticCandidates, ...heuristicCandidates])];
+      const candidatesBeforeFilter = [...new Set([...semanticCandidates, ...heuristicCandidates])];
+      // text/tag/type filtering happens here, BEFORE candidates reaches the
+      // MAX_ELEMENTS loop below -- this is what makes filter narrow the
+      // candidate set rather than just post-filter the final array.
+      const candidates = candidatesBeforeFilter.filter((el) => {
+        if (filter.tag && el.tagName.toLowerCase() !== filter.tag.toLowerCase()) return false;
+        if (filter.type) {
+          const elType = (el.getAttribute('type') || '').toLowerCase();
+          if (elType !== filter.type.toLowerCase()) return false;
+        }
+        if (filter.text) {
+          // Full, untruncated label -- matches the same fallback chain the
+          // existing per-element label computation below uses, but without
+          // the eventual .slice(0, 100). A match that only occurs after
+          // character 100 of a long label must still be found here.
+          //
+          // NOTE (maintenance risk, accepted -- flagged by use-codex plan
+          // review): this label computation is intentionally duplicated
+          // from the per-element loop below, not extracted into a shared
+          // helper. The two copies are correct and consistent as of this
+          // batch (same fallback chain, same trim/whitespace normalization,
+          // same password/hidden/file exclusion), but a future change to
+          // label-building logic must update BOTH copies, or filtering and
+          // the returned `text` field can silently disagree. Not fixed in
+          // this batch (extracting a shared helper would touch more of the
+          // existing, already-reviewed list_elements loop than this batch's
+          // scope warrants) -- if label logic changes again, revisit this.
+          const isValueExcluded = ['password', 'hidden', 'file'].includes(
+            (el.getAttribute('type') || '').toLowerCase()
+          );
+          const fullLabel = (
+            el.innerText || (isValueExcluded ? '' : el.value) || el.getAttribute('aria-label') || el.getAttribute('placeholder') || ''
+          ).trim().replace(/\s+/g, ' ');
+          if (!fullLabel.toLowerCase().includes(filter.text.toLowerCase())) return false;
+        }
+        return true;
+      });
       // A password/hidden/file input's .value can hold a real credential or
       // secret (typed by the user, autofilled by Firefox's password manager
       // between list_elements calls, or a CSRF/session token embedded by the
@@ -246,6 +340,7 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         elements,
         totalCandidates: candidates.length,
         truncated: cappedByLimit,
+        domEpoch,
       });
     }
 
