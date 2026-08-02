@@ -22,6 +22,8 @@
     "bookmarks",
     "storage",
     "scripting",
+    "contextualIdentities",
+    "cookies",
     "<all_urls>"
   ],
   "background": {

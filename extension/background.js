@@ -260,6 +260,8 @@ async function handleNativeMessage(msg) {
         return respond(await handleNavigate(msg));
       case 'list_tabs':
         return respond(await handleListTabs());
+      case 'list_containers':
+        return respond(await handleListContainers());
       case 'search_history':
         return respond(await handleSearchHistory(msg));
       case 'add_bookmark':
@@ -337,6 +339,19 @@ async function handleNavigate(msg) {
 
   await browser.tabs.update(msg.tabId, { url: msg.url });
   return { ok: true };
+}
+
+async function handleListContainers() {
+  const containers = await browser.contextualIdentities.query({});
+  return {
+    ok: true,
+    containers: containers.map((c) => ({
+      cookieStoreId: c.cookieStoreId,
+      name: c.name,
+      color: c.color,
+      icon: c.icon,
+    })),
+  };
 }
 
 async function handleListTabs() {

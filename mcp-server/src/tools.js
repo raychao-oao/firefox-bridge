@@ -178,6 +178,19 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'list_containers',
+    {
+      description:
+        "List Firefox Multi-Account Containers (browser.contextualIdentities). Each entry's `cookieStoreId` can be passed to `acquire_tab` to open a new tab inside that container — the same website can be logged into different accounts simultaneously across different containers.",
+      inputSchema: {},
+    },
+    async () => {
+      const result = await bridgeClient.call({ type: 'list_containers' });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'search_history',
     {
       description:
