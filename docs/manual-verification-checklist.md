@@ -21,6 +21,23 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `navigate` to a normal (non-blacklisted) URL succeeds
 - [ ] `click` on a known selector (test against a simple local HTML page) actually clicks
 - [ ] `type` on an input field sets its value and fires `input`/`change` (verify via a page that echoes input state)
+- [ ] 對一個點擊後不會觸發任何後續效果的普通連結呼叫 `click`，確認 `navigated: false`、`dialogOpened: false`、`domChanged` 反映實際情況（連結若有 `href` 導覽，`navigated` 應為 `true`）
+- [ ] 對一個點擊後會觸發 `window.location.href` 導覽（不是 `<a>` 標籤，是 JS 導覽）的按鈕呼叫 `click`，確認 `navigated: true` 且 `newUrl` 是導覽後的網址
+- [ ] 構造一個點擊後會同步呼叫 `window.confirm(...)` 的測試頁面（`onclick="confirm('...')"`），呼叫 `click`，確認在約 600ms 內收到回應且 `dialogOpened: true`（不是整個 MCP 呼叫卡住等到對話框被關掉才回應）——這是驗證本設計核心假設的關鍵測試，之後手動在 Firefox 視窗上把測試用的 `confirm()` 對話框關掉，確認擴充功能沒有崩潰或留下無法清除的狀態
+- [ ] 對一個完全正常、沒有任何對話框的按鈕連續呼叫 `click` 多次（例如 10 次），確認沒有任何一次被誤判成 `dialogOpened: true`——驗證 background 600ms 逾時跟 content-script 300ms 觀察窗之間的緩衝夠用，不會被正常的訊息往返延遲誤觸發
+- [ ] 對一個點擊後會用 `element.textContent = ...`、`element.appendChild(...)` 等方式改動 DOM 的按鈕呼叫 `click`，確認 `domChanged: true`
+- [ ] 對一個點擊後完全沒有任何後續效果（一個 `<div>` 只有 `cursor:pointer` 沒有任何 handler）的元素呼叫 `click`，確認四個欄位都反映「什麼都沒發生」（`navigated: false`、`dialogOpened: false`、`domChanged: false`）
+- [ ] `wait_for({selector})` 對一個目前不存在、但 2 秒後會被 JS 動態插入的元素呼叫，確認在插入後立即返回 `matched: true`、`timedOut: false`，而不是等到 `timeoutMs` 上限
+- [ ] `wait_for({selector})` 對一個永遠不會出現的 selector 呼叫（`timeoutMs: 1000`），確認在約 1 秒後返回 `matched: false`、`timedOut: true`，不是拋出例外或永遠 pending
+- [ ] `wait_for({textGone})` 對一個目前顯示「載入中...」、稍後會被替換掉的頁面呼叫，確認文字消失後立即返回
+- [ ] `wait_for({networkIdle: true})` 對一個會連續發出幾個 XHR/fetch 請求、之後安靜下來的頁面呼叫，確認在最後一個請求完成後的安靜視窗內返回，而不是提早在請求還在進行時返回——且不需要先呼叫 `start_network`（驗證這批改用的獨立 listener，不依賴既有訂閱）
+- [ ] `wait_for` 同時傳 `selector` 和 `textGone`（或三個條件都不傳）呼叫，確認回傳 `invalid_wait_condition`
+- [ ] `wait_for({selector: ''})`（空字串）或 `wait_for({networkIdle: false})` 呼叫，確認都回傳 `invalid_wait_condition`，不是被誤判成「有效條件」（`use-codex` review 發現的驗證邏輯漏洞——空字串跟 `networkIdle: false` 都必須被當成「沒設」，不是「設了但值是空/false」）
+- [ ] 在一個有 iframe 的頁面上，`wait_for({selector})` 不傳 `frameId` 呼叫，確認走的是單一 frame（top frame）路徑、回傳 `{matched, timedOut}` 形狀，而不是意外落入 `read_page`/`list_elements` 的多 frame 聚合路徑回傳 `{frames: [...]}`（`use-codex` review 抓到的唯一一個確定性 bug，這是它的直接迴歸測試）
+- [ ] 同時對同一個 tab 發起兩個 `wait_for({networkIdle: true})` 呼叫（例如兩個平行的 MCP 呼叫），確認兩者各自獨立正確運作，不會互相干擾或提早釋放彼此的計時
+- [ ] 對一個有請求失敗（如 404）或請求長時間掛著不結束的頁面呼叫 `wait_for({networkIdle: true})`，確認理解並接受這個已知限制：只追蹤 `onCompleted`，一個掛著不結束的請求不會被算進「還在忙」，可能提早回報 `matched: true`
+- [ ] 呼叫 `wait_for({networkIdle: true})` 後立刻切到背景分頁（不切回來），確認呼叫本身不會掛住或崩潰，會在 `timeoutMs` 內以某種方式結束（`matched` 或 `timedOut`）
+- [ ] 呼叫 `wait_for` 後在等待期間手動關閉該分頁，確認整個 MCP server 不會崩潰或掛住，呼叫最終有某種方式結束（可能回傳錯誤，也可能等到 timeout——不要求特定行為，只確認不是永遠 pending 或讓 server 掛掉）
 - [ ] `read_page` returns the page's visible text
 - [ ] `list_elements` returns interactive elements with working `selector`s; a follow-up `click`/`type` using one of those selectors hits exactly the inspected element
 - [ ] `list_elements` on a page whose clickable targets are plain `li`/`span`/`div` with a JS-bound (not inline `onclick`) handler still finds them via the `cursor: pointer` heuristic
