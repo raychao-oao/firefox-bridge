@@ -18,11 +18,31 @@ export function registerTools(server, bridgeClient) {
     'click',
     {
       description:
-        'Click an element in a leased tab, identified by a CSS selector. Pass `frameId` to target a specific frame (get it from `list_frames` or a `list_elements` entry) — defaults to the top frame (0), which does NOT reach into iframes.',
+        'Click an element in a leased tab, identified by a CSS selector. Pass `frameId` to target a specific frame (get it from `list_frames` or a `list_elements` entry) — defaults to the top frame (0), which does NOT reach into iframes. `ok: true` only means the click event was dispatched, NOT that its expected effect happened — check the response fields: `navigated` (tab URL changed by the time this returned — a navigation that started but had not yet updated the tab URL will read as false), `dialogOpened` (this tool did not hear back from the page within ~600ms — a native confirm()/alert() blocking the page is the most likely cause, but a slow click handler, a debugger breakpoint, or a backgrounded/throttled tab can look identical; this tool cannot read or dismiss a dialog either way), `domChanged` (a coarse, best-effort signal that SOMETHING in the DOM changed, not a precise diff), and `newUrl` (present only when `navigated` is true). For a real change that may take longer than an instant, follow up with `wait_for`.',
       inputSchema: { tabId: z.number(), selector: z.string(), frameId: z.number().optional() },
     },
     async ({ tabId, selector, frameId }) => {
       const result = await bridgeClient.call({ type: 'click', tabId, selector, frameId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'wait_for',
+    {
+      description:
+        "Wait in a leased tab for a condition: `selector` appears, `textGone` disappears from the page, or `networkIdle` (no new requests for a beat). Exactly one of selector/textGone/networkIdle must be set. Returns immediately once matched, or after `timeoutMs` (default 5000) with timedOut: true -- this never throws on timeout.",
+      inputSchema: {
+        tabId: z.number(),
+        selector: z.string().optional(),
+        textGone: z.string().optional(),
+        networkIdle: z.boolean().optional(),
+        timeoutMs: z.number().optional(),
+        frameId: z.number().optional(),
+      },
+    },
+    async ({ tabId, selector, textGone, networkIdle, timeoutMs, frameId }) => {
+      const result = await bridgeClient.call({ type: 'wait_for', tabId, selector, textGone, networkIdle, timeoutMs, frameId });
       return toolResult(result);
     }
   );
