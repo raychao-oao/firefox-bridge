@@ -60,8 +60,10 @@ every time it restarts.
 To build and sign your own `.xpi` from source: get an API key/secret from
 [AMO](https://addons.mozilla.org/en-US/developers/addon/api/key/), then run
 ```
-AMO_API_KEY=... AMO_API_SECRET=... node scripts/sign-extension.js
+AMO_API_KEY=... AMO_API_SECRET=... npm run sign
 ```
+(equivalent to `node scripts/sign-extension.js` directly — `npm run sign` is just shorter to
+remember/re-run after each change to `extension/`.)
 
 ### 2. Native messaging host
 
