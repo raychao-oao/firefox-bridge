@@ -467,6 +467,48 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       return Promise.resolve({ ok: true });
     }
 
+    if (msg.type === 'drag_and_drop') {
+      let source;
+      try {
+        source = document.querySelector(msg.sourceSelector);
+      } catch (err) {
+        return Promise.resolve({ ok: false, error: 'invalid_source_selector' });
+      }
+      if (!source) return Promise.resolve({ ok: false, error: 'source_not_found' });
+      let target;
+      try {
+        target = document.querySelector(msg.targetSelector);
+      } catch (err) {
+        return Promise.resolve({ ok: false, error: 'invalid_target_selector' });
+      }
+      if (!target) return Promise.resolve({ ok: false, error: 'target_not_found' });
+
+      // This only works for elements using the native HTML5 Drag and Drop API
+      // (draggable="true" + dragstart/dragover/drop listeners) -- many modern
+      // UI libraries simulate drag with mousedown/mousemove/mouseup instead
+      // (especially ones supporting touch), and those will NOT respond to
+      // these DragEvents at all. dragoverAccepted/dropHandled below are how a
+      // caller can tell "nothing responded" apart from "it worked."
+      const dt = new DataTransfer();
+      source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      target.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      const dragoverEvent = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt });
+      target.dispatchEvent(dragoverEvent);
+      const dropEvent = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
+      target.dispatchEvent(dropEvent);
+      source.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer: dt }));
+
+      // Per the HTML5 DnD spec, a target must call preventDefault() on
+      // dragover to indicate it accepts the drop -- reading defaultPrevented
+      // back turns "were these events dispatched" into "did anything actually
+      // handle them," instead of a blind ok:true either way.
+      return Promise.resolve({
+        ok: true,
+        dragoverAccepted: dragoverEvent.defaultPrevented,
+        dropHandled: dropEvent.defaultPrevented,
+      });
+    }
+
     return false; // not handled by this listener
   });
 

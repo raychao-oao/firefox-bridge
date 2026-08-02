@@ -289,6 +289,8 @@ async function handleNativeMessage(msg) {
         return respond(await forwardToContentScript(msg));
       case 'scroll_to':
         return respond(await forwardToContentScript(msg));
+      case 'drag_and_drop':
+        return respond(await forwardToContentScript(msg));
       case 'press_key':
         return respond(await forwardToContentScript(msg));
       case 'hover':
@@ -1225,6 +1227,15 @@ async function forwardToContentScript(msg) {
     // Single frame only, no cross-frame fallback search or aggregation --
     // a selector is always frame-local, and there's exactly one frame the
     // caller means to scroll within (default the top frame if unstated).
+    const frameId = msg.frameId ?? 0;
+    const gate = await privilegedGate(msg, { frameId });
+    if (!gate.ok) return gate;
+    return sendToFrame(msg.tabId, frameId, msg);
+  }
+  if (msg.type === 'drag_and_drop') {
+    // Single frame only -- source and target need to be in the same
+    // document for a drag operation to make sense, same reasoning as
+    // scroll_to.
     const frameId = msg.frameId ?? 0;
     const gate = await privilegedGate(msg, { frameId });
     if (!gate.ok) return gate;

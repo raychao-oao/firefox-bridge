@@ -141,6 +141,24 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'drag_and_drop',
+    {
+      description:
+        "Simulate a drag-and-drop from one element to another in a leased tab, identified by CSS selectors, via the native HTML5 Drag and Drop event sequence (dragstart/dragenter/dragover/drop/dragend). Single frame only (no cross-frame fallback search, unlike click/type) -- pass `frameId` to target a specific frame, defaults to the top frame (0). IMPORTANT: this only works for elements using the browser's NATIVE HTML5 Drag and Drop API (draggable=\"true\" + dragstart/dragover/drop listeners). Many modern UI libraries (especially ones supporting touch) implement drag-and-drop with mousedown/mousemove/mouseup instead, and those will NOT respond to this tool at all -- the response's `dragoverAccepted`/`dropHandled` booleans tell you whether anything actually handled the dispatched events (per the DnD spec, a valid drop target must call preventDefault() on dragover to accept the drop): both false means the events were dispatched but nothing responded, which usually means the target isn't using native DnD, not that this tool failed. Returns `source_not_found`/`target_not_found` if a selector is valid but matches nothing, `invalid_source_selector`/`invalid_target_selector` on a CSS syntax error.",
+      inputSchema: {
+        tabId: z.number(),
+        sourceSelector: z.string(),
+        targetSelector: z.string(),
+        frameId: z.number().optional(),
+      },
+    },
+    async ({ tabId, sourceSelector, targetSelector, frameId }) => {
+      const result = await bridgeClient.call({ type: 'drag_and_drop', tabId, sourceSelector, targetSelector, frameId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'press_key',
     {
       description:
