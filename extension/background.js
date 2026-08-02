@@ -302,6 +302,9 @@ async function handleNativeMessage(msg) {
 
 async function handleAcquireTab(msg) {
   const sessionId = msg.sessionId;
+  if (msg.tabId != null && msg.cookieStoreId != null) {
+    return { ok: false, error: 'cookie_store_requires_new_tab' };
+  }
   let tab;
   if (msg.tabId != null) {
     const owner = leaseOwner.get(msg.tabId);
@@ -318,13 +321,27 @@ async function handleAcquireTab(msg) {
     const url = msg.url || 'about:blank';
     const policy = await policyCheck(url, sessionId);
     if (!policy.allowed) return { ok: false, error: policy.error };
-    tab = await browser.tabs.create({ url });
+    if (msg.cookieStoreId != null) {
+      // contextualIdentities.get() rejects only when cookieStoreId doesn't
+      // correspond to a real container (this also excludes Firefox's
+      // reserved non-container stores, e.g. "firefox-default" — those are
+      // never recognized by this call). That is its only failure mode, so
+      // any rejection here means "not a real container".
+      try {
+        await browser.contextualIdentities.get(msg.cookieStoreId);
+      } catch {
+        return { ok: false, error: 'container_not_found' };
+      }
+      tab = await browser.tabs.create({ url, cookieStoreId: msg.cookieStoreId });
+    } else {
+      tab = await browser.tabs.create({ url });
+    }
   }
   if (leaseOwner.get(tab.id) && leaseOwner.get(tab.id) !== sessionId) {
     return { ok: false, error: 'conflict' };
   }
   leaseOwner.set(tab.id, sessionId);
-  return { ok: true, tabId: tab.id, url: tab.url };
+  return { ok: true, tabId: tab.id, url: tab.url, cookieStoreId: tab.cookieStoreId };
 }
 
 function handleReleaseTab(msg) {

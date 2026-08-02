@@ -144,11 +144,12 @@ export function registerTools(server, bridgeClient) {
   server.registerTool(
     'acquire_tab',
     {
-      description: 'Lease a new or existing Firefox tab for this session. Pass a url to open a new tab, or a tabId to lease an existing one.',
-      inputSchema: { url: z.string().optional(), tabId: z.number().optional() },
+      description:
+        'Lease a new or existing Firefox tab for this session. Pass a url to open a new tab, or a tabId to lease an existing one. Pass `cookieStoreId` (from `list_containers`/`create_container`) to open the new tab inside that container — only valid when opening a NEW tab (no `tabId`); combining `tabId` with `cookieStoreId` returns `cookie_store_requires_new_tab`, since an existing tab\'s container was fixed when it was created and cannot be changed. An unrecognized `cookieStoreId` (including Firefox\'s reserved, non-container stores) returns `container_not_found`. The response always includes `cookieStoreId` for the tab you got, whether or not you passed one — a normal (non-container) tab reports Firefox\'s default store id.',
+      inputSchema: { url: z.string().optional(), tabId: z.number().optional(), cookieStoreId: z.string().optional() },
     },
-    async ({ url, tabId }) => {
-      const result = await bridgeClient.call({ type: 'acquire_tab', url, tabId });
+    async ({ url, tabId, cookieStoreId }) => {
+      const result = await bridgeClient.call({ type: 'acquire_tab', url, tabId, cookieStoreId });
       return toolResult(result);
     }
   );
