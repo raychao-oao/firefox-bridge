@@ -241,6 +241,36 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       });
     }
 
+    if (msg.type === 'wait_for') {
+      const POLL_INTERVAL_MS = 100;
+      const deadline = Date.now() + (msg.timeoutMs ?? 5000);
+      return new Promise((resolve) => {
+        const poll = () => {
+          if (msg.selector) {
+            if (document.querySelector(msg.selector)) {
+              resolve({ ok: true, matched: true, timedOut: false });
+              return;
+            }
+          } else if (msg.textGone) {
+            // document.body can be null very early in a document's life
+            // (matches read_page's existing `document.body ? ... : ''`
+            // guard elsewhere in this file) -- treat "no body at all" as
+            // the text trivially being gone, not as an error.
+            if (!document.body || !document.body.innerText.includes(msg.textGone)) {
+              resolve({ ok: true, matched: true, timedOut: false });
+              return;
+            }
+          }
+          if (Date.now() >= deadline) {
+            resolve({ ok: true, matched: false, timedOut: true });
+            return;
+          }
+          setTimeout(poll, POLL_INTERVAL_MS);
+        };
+        poll();
+      });
+    }
+
     return false; // not handled by this listener
   });
 

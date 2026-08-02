@@ -280,6 +280,8 @@ async function handleNativeMessage(msg) {
       case 'read_page':
       case 'list_elements':
         return respond(await forwardToContentScript(msg));
+      case 'wait_for':
+        return respond(await handleWaitFor(msg));
       case 'list_frames':
         return respond(await handleListFrames(msg));
       case 'screenshot':
@@ -894,7 +896,7 @@ async function handleClick(msg) {
 async function forwardToContentScript(msg) {
   // click/type always target one specific frame (default top frame) --
   // there's no meaningful "click in every frame at once".
-  if (msg.type === 'click' || msg.type === 'type') {
+  if (msg.type === 'click' || msg.type === 'type' || msg.type === 'wait_for') {
     const frameId = msg.frameId ?? 0;
     const gate = await privilegedGate(msg, { frameId });
     if (!gate.ok) return gate;
@@ -1012,6 +1014,82 @@ browser.webRequest.onCompleted.addListener(
   },
   { urls: ['<all_urls>'] }
 );
+
+async function handleWaitFor(msg) {
+  // "Set" means a MEANINGFUL value: selector/textGone must be non-empty
+  // strings, networkIdle must be exactly `true`. A naive `!== undefined`
+  // check would count an empty string or an explicit `networkIdle: false`
+  // as "set" -- the former would then race two never-matching conditions
+  // in content-script (harmless but pointless), the latter would silently
+  // fall through to content-script polling with NEITHER condition set,
+  // which just times out doing nothing. Found during use-codex plan review.
+  const hasSelector = typeof msg.selector === 'string' && msg.selector.length > 0;
+  const hasTextGone = typeof msg.textGone === 'string' && msg.textGone.length > 0;
+  const hasNetworkIdle = msg.networkIdle === true;
+  const conditionsSet = [hasSelector, hasTextGone, hasNetworkIdle].filter(Boolean).length;
+  if (conditionsSet !== 1) {
+    return { ok: false, error: 'invalid_wait_condition' };
+  }
+  if (hasNetworkIdle) {
+    return handleWaitForNetworkIdle(msg);
+  }
+  return forwardToContentScript(msg);
+}
+
+// Deliberately self-contained -- does NOT reuse the existing networkBuffers
+// map (see handleStartNetwork/handleGetNetwork above). That map only
+// buffers for tabs with an active start_network subscription and is meant
+// for the caller-visible get_network history; this needs its own
+// lastActivity tracker regardless of whether start_network was ever called.
+//
+// Known limitations, not fixed in this batch (found during use-codex plan
+// review, verified sound overall -- multiple browser.webRequest.onCompleted
+// listeners coexist safely, this one doesn't interfere with the existing
+// networkBuffers-based listener, and each concurrent wait_for({networkIdle})
+// call has its own independent lastActivity/listener so concurrent waits on
+// the same or different tabs don't share state):
+// - Requests already in flight *before* this listener is installed are
+//   invisible to it -- only onCompleted events firing after the listener is
+//   added count as "activity."
+// - Only onCompleted is tracked (matching networkBuffers's existing
+//   behavior) -- a failed, cancelled, or still-in-progress request doesn't
+//   count as activity, so a page with one very long-running request could
+//   report matched: true (falsely "idle") while that request is still
+//   pending.
+// - If the tab closes mid-wait, nothing detects that -- the wait either
+//   continues to timeoutMs or reports idle after IDLE_WINDOW_MS of
+//   (now-impossible) further activity, same as it would for any other
+//   quiet tab.
+// - addListener itself is called outside the try block -- if it throws
+//   (not expected in normal operation), the function exits before the
+//   finally would run. Accepted as-is; not defensively wrapped in this
+//   batch.
+async function handleWaitForNetworkIdle(msg) {
+  const gate = await privilegedGate(msg, { frameId: msg.frameId ?? 0 });
+  if (!gate.ok) return gate;
+
+  const IDLE_WINDOW_MS = 500;
+  const POLL_INTERVAL_MS = 100;
+  const deadline = Date.now() + (msg.timeoutMs ?? 5000);
+
+  let lastActivity = Date.now();
+  const onCompleted = (details) => {
+    if (details.tabId === msg.tabId) lastActivity = Date.now();
+  };
+  browser.webRequest.onCompleted.addListener(onCompleted, { urls: ['<all_urls>'] });
+
+  try {
+    while (Date.now() < deadline) {
+      if (Date.now() - lastActivity >= IDLE_WINDOW_MS) {
+        return { ok: true, matched: true, timedOut: false };
+      }
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+    return { ok: true, matched: false, timedOut: true };
+  } finally {
+    browser.webRequest.onCompleted.removeListener(onCompleted);
+  }
+}
 
 async function handleStartNetwork(msg) {
   const gate = await privilegedGate(msg);
