@@ -121,8 +121,14 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `click` / `type` with `frameId` omitted defaults to the top frame (0) — does NOT reach into iframes
 - [ ] A blacklisted URL loaded inside an iframe (top-level page itself NOT blacklisted) still triggers the confirmation gate when that specific frame is read/clicked — the top-level page being allowed must not leak the embedded frame
 - [ ] An unreachable frame (e.g. `about:blank`, or one blocked by host permissions) appears in `frameErrors` with a real per-frame error, and does NOT fail the whole aggregate `read_page`/`list_elements` call for the other frames
-- [ ] `screenshot` returns base64 PNG bytes that decode to a valid image
-- [ ] `screenshot` of a large/retina full-page capture (>1 MiB PNG) still succeeds — this exercises the multi-chunk native-messaging path
+- [ ] `screenshot` returns `{ok: true, path: "<absolute path>"}`; opening that file confirms it decodes to a valid PNG image
+- [ ] `screenshot` of a large/retina full-page capture (>1 MiB PNG) still succeeds — this exercises the multi-chunk native-messaging path internally, even though the final tool response is now just a short file path
+- [ ] 對一個已知內容的分頁呼叫 `screenshot({tabId})`，確認回應是 `{ok: true, path: "<絕對路徑>"}`，不是一大包 base64 文字
+- [ ] 用回傳的路徑實際開啟該檔案（例如用 Claude Code 的 `Read` 工具，或直接用系統的圖片檢視器），確認內容是該分頁當下畫面的正確截圖
+- [ ] 連續對同一個分頁呼叫 `screenshot` 兩次，確認兩次回傳的路徑不同（檔名不會撞在一起），且兩個檔案都存在、內容分別對應各自呼叫當下的畫面
+- [ ] 確認 `SCREENSHOT_DIR`（`os.tmpdir()/firefox-bridge-screenshots`）在檔案系統上被建立，且權限合理（不是對所有使用者可讀寫）
+- [ ] 對一個不存在的 `tabId`（或沒有 lease 的分頁）呼叫 `screenshot`，確認既有的錯誤處理路徑不變（回傳原本的結構化錯誤，不會嘗試寫入任何檔案）
+- [ ] 用某種方式讓檔案寫入失敗（例如暫時把 `SCREENSHOT_DIR` 所在的磁碟設成唯讀，或用權限阻擋寫入），確認回傳 `{ok: false, error: 'screenshot_file_write_failed: ...'}`，不是未處理的例外讓整個 MCP 呼叫掛掉；確認沒有殘留 `.tmp` 檔案卡在目錄裡
 - [ ] `start_console` + a page `console.log(...)` + `get_console` returns that message
 - [ ] `console.log()`ing a very long string (>2000 chars) or large object results in a `get_console` entry truncated to ~2000 chars with a `...[truncated, N chars total]` marker, not the full original length
 - [ ] Navigating to a page whose script requests have very long URLs (e.g. `pagespeed.web.dev`) results in `get_network` entries with `url` truncated to ~2000 chars with the same marker
