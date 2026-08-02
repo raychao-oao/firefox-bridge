@@ -262,6 +262,8 @@ async function handleNativeMessage(msg) {
         return respond(await handleListTabs());
       case 'list_containers':
         return respond(await handleListContainers());
+      case 'create_container':
+        return respond(await handleCreateContainer(msg));
       case 'search_history':
         return respond(await handleSearchHistory(msg));
       case 'add_bookmark':
@@ -351,6 +353,23 @@ async function handleListContainers() {
       color: c.color,
       icon: c.icon,
     })),
+  };
+}
+
+async function handleCreateContainer(msg) {
+  const container = await browser.contextualIdentities.create({
+    name: msg.name,
+    color: msg.color,
+    icon: msg.icon,
+  });
+  return {
+    ok: true,
+    container: {
+      cookieStoreId: container.cookieStoreId,
+      name: container.name,
+      color: container.color,
+      icon: container.icon,
+    },
   };
 }
 

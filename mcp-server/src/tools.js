@@ -191,6 +191,19 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'create_container',
+    {
+      description:
+        "Create a new Firefox Multi-Account Container (browser.contextualIdentities). `color`/`icon` are passed straight through to Firefox — an unsupported value is rejected by Firefox itself and surfaced here as a plain error message (Firefox's own contextualIdentities.getSupportedColors()/getSupportedIcons() are the source of truth for legal values; this tool does not hardcode a list). Does NOT deduplicate by `name` — Firefox allows multiple containers with the same name, and each call creates a genuinely new one (`cookieStoreId`, returned here, is the real identity, not `name`). Pass the returned `cookieStoreId` to `acquire_tab` to open a tab inside this container.",
+      inputSchema: { name: z.string(), color: z.string(), icon: z.string() },
+    },
+    async ({ name, color, icon }) => {
+      const result = await bridgeClient.call({ type: 'create_container', name, color, icon });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'search_history',
     {
       description:
