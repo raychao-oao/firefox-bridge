@@ -128,8 +128,13 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         if (!el.dataset.fbId) {
           el.dataset.fbId = fbGenerateId();
         }
+        // A password input's .value can hold a real credential (typed by the
+        // user or autofilled by Firefox's own password manager between
+        // list_elements calls) -- never let it reach the label, which flows
+        // straight into LLM context.
+        const isPassword = el.getAttribute('type') === 'password';
         const label =
-          (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
+          (el.innerText || (isPassword ? '' : el.value) || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
             .trim()
             .replace(/\s+/g, ' ')
             .slice(0, 100);
