@@ -319,23 +319,29 @@ async function handleAcquireTab(msg) {
     // Opening a NEW tab straight at a blacklisted URL must be gated too,
     // otherwise acquire_tab is a way around navigate's check.
     const url = msg.url || 'about:blank';
+    if (msg.cookieStoreId != null) {
+      // query({}) — not get() — because query() only fails when the
+      // container feature itself is unavailable (e.g. the user disabled
+      // Container Tabs via privacy.userContext.enabled), which must NOT be
+      // reported as container_not_found — it should propagate to the
+      // generic error path. A cookieStoreId simply not being in the list
+      // (including reserved stores like "firefox-default", which never
+      // appear in query() results) is the only case that becomes
+      // container_not_found.
+      //
+      // This existence check runs before policyCheck (argument/target
+      // validation before any user-facing gate) so a bogus cookieStoreId
+      // doesn't trigger the blacklist confirmation dialog for a request
+      // that was always going to fail anyway.
+      const containers = await browser.contextualIdentities.query({});
+      const found = containers.some((c) => c.cookieStoreId === msg.cookieStoreId);
+      if (!found) return { ok: false, error: 'container_not_found' };
+    }
     const policy = await policyCheck(url, sessionId);
     if (!policy.allowed) return { ok: false, error: policy.error };
-    if (msg.cookieStoreId != null) {
-      // contextualIdentities.get() rejects only when cookieStoreId doesn't
-      // correspond to a real container (this also excludes Firefox's
-      // reserved non-container stores, e.g. "firefox-default" — those are
-      // never recognized by this call). That is its only failure mode, so
-      // any rejection here means "not a real container".
-      try {
-        await browser.contextualIdentities.get(msg.cookieStoreId);
-      } catch {
-        return { ok: false, error: 'container_not_found' };
-      }
-      tab = await browser.tabs.create({ url, cookieStoreId: msg.cookieStoreId });
-    } else {
-      tab = await browser.tabs.create({ url });
-    }
+    tab = msg.cookieStoreId != null
+      ? await browser.tabs.create({ url, cookieStoreId: msg.cookieStoreId })
+      : await browser.tabs.create({ url });
   }
   if (leaseOwner.get(tab.id) && leaseOwner.get(tab.id) !== sessionId) {
     return { ok: false, error: 'conflict' };

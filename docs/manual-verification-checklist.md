@@ -99,6 +99,7 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `acquire_tab({cookieStoreId, url})` opens a new tab at that URL that also belongs to that container — both conditions hold at once, not just one
 - [ ] `acquire_tab({tabId, cookieStoreId})` together (any values) returns `cookie_store_requires_new_tab`, not a silently-ignored parameter
 - [ ] `acquire_tab({cookieStoreId: "<random nonexistent string>"})` returns `container_not_found`, not an unhandled exception or a tab opened in the default container
+- [ ] `create_container` called with an empty string `name` (`""`) either succeeds with an empty/unnamed container or returns a structured error — confirm which, so this isn't a silently untested assumption (no local validation is deliberate; Firefox is the authority)
 - [ ] `acquire_tab({cookieStoreId: "firefox-default"})` (a reserved, non-container Firefox store id) also returns `container_not_found` — this is a distinct check from the random-string case above, confirming reserved stores aren't mistaken for real containers
 - [ ] Manually open a tab inside a container in Firefox's UI, then `acquire_tab({tabId})` (no `cookieStoreId`) to lease it — confirm the response's `cookieStoreId` correctly reflects that tab's actual container, not just the "open new tab" path
 - [ ] `list_tabs()` reports the correct `cookieStoreId` for every open tab, including ordinary (non-container) tabs, which should report Firefox's default store id (e.g. `firefox-default`)
