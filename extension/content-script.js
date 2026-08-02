@@ -133,7 +133,7 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       // readOnly is only meaningful on text-like inputs -- reading it on a
       // checkbox/radio/button/file input is safe (never throws) but always
       // reports a meaningless `false`, which would look like a real signal.
-      const READONLY_APPLICABLE_TYPES = new Set(['text', 'email', 'url', 'tel', 'search', 'number', 'password']);
+      const READONLY_APPLICABLE_TYPES = new Set(['text', 'email', 'url', 'tel', 'search', 'number', 'password', '']);
       const elements = [];
       for (const el of candidates) {
         if (elements.length >= MAX_ELEMENTS) break;
