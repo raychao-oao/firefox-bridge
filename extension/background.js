@@ -992,13 +992,41 @@ async function searchFramesForResult(msg, attemptFrame) {
       incomplete = true;
       break;
     }
-    const frameGate = await privilegedGate(msg, { frameId: frame.frameId });
-    if (!frameGate.ok) {
+    // Non-interactive check ONLY, unlike the frame-0 gate above and the
+    // explicit-frameId path elsewhere: privilegedGate's policyCheck calls
+    // requestUserConfirmation, which can pop a real, up-to-60s user
+    // confirmation dialog. Iframes from ad/tracker domains landing on the
+    // blacklist are common, so an automatic fallback search walking past
+    // several of them could pop a dialog per frame, sequentially, inside
+    // one click/type call -- easily blowing past the native host's 90s
+    // REQUEST_TIMEOUT_MS if any dialog is ignored. So this loop calls
+    // policyGate.checkUrl directly (same session-scoped onceGrants/
+    // sessionGrants used by policyCheck, so an already-granted permission
+    // is still honored) and treats anything short of 'allow' as a
+    // policy-skip -- never prompting. A caller who actually wants to
+    // interact with a blacklisted frame can still pass an explicit
+    // frameId and get today's normal interactive prompt via privilegedGate.
+    const sessionOnceGrants = onceGrants.get(msg.sessionId) || new Set();
+    const decision = policyGate.checkUrl(frame.url, {
+      onceGrants: sessionOnceGrants,
+      sessionGrants,
+      sessionId: msg.sessionId,
+    });
+    if (decision !== 'allow') {
       incomplete = true;
       continue;
     }
     framesTried += 1;
     const result = await attemptFrame(frame.frameId);
+    if (!result.ok && (result.error?.startsWith('content_script_inject_failed') || result.error?.startsWith('content_script_unreachable'))) {
+      // Transport-level failure (e.g. about:blank placeholder, PDF viewer
+      // frame, or a frame outside host permissions) -- proves nothing about
+      // whether the target element exists in this frame, unlike
+      // option_not_found (which proves the element WAS found). Skip and
+      // keep searching, same as a policy-skipped frame.
+      incomplete = true;
+      continue;
+    }
     if (result.ok || !RETRYABLE_ERRORS.has(result.error)) return result;
   }
 
@@ -1096,8 +1124,6 @@ async function handleClick(msg) {
 }
 
 async function forwardToContentScript(msg) {
-  // click/type always target one specific frame (default top frame) --
-  // there's no meaningful "click in every frame at once".
   // click is handled entirely by handleClick now (see the switch in
   // handleNativeMessage) -- this function never receives msg.type ===
   // 'click'. type gets the same frame-fallback search as click, but with
