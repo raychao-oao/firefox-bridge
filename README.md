@@ -31,6 +31,8 @@ you're already using, logged into whatever you're logged into.
   (allow once / allow for session / deny) rather than silently proceeding.
 - **Payload handles**: large data (screenshots) goes through a temp-file + opaque-handle
   path instead of inline in messages, keeping under the native-messaging size cap.
+  `screenshot` itself writes the captured PNG to a local file and returns its absolute
+  path — read the file directly rather than expecting image bytes in the tool response.
 - **Frame-aware**: `click`/`type`/`read_page`/`list_elements` can target a specific
   `<iframe>` (discovered via `list_frames`); each frame is gated by its own blacklist
   policy independently, so an allowed top-level page can't become a path to read a
