@@ -43,7 +43,7 @@ you're already using, logged into whatever you're logged into.
 ## Tools
 
 `navigate`, `click`, `type`, `read_page`, `list_elements`, `list_frames`, `screenshot`,
-`scroll_to`, `start_console`/`get_console`, `start_network`/`get_network`,
+`scroll_to`, `press_key`, `hover`, `drag_and_drop`, `upload_file`, `start_console`/`get_console`, `start_network`/`get_network`,
 `acquire_tab`/`release_tab`, `list_tabs`, `search_history`, `add_bookmark`,
 `list_bookmarks`, `search_bookmarks`, `to_be_deleted`, `list_containers`,
 `create_container`, `wait_for`.

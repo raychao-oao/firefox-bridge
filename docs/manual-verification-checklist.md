@@ -219,3 +219,19 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] Call `scroll_to` with a selector that matches nothing, and confirm it returns `element_not_found`
 - [ ] On a page with more than 300 interactive elements (e.g. a link-heavy homepage), call `list_elements` and confirm `truncated: true` when the cap is actually hit
 - [ ] Call `list_elements` with an explicit `frameId` and again with `frameId` omitted (aggregate mode), and confirm both response shapes are correct in each mode
+
+### Interaction gaps (press_key, hover, drag_and_drop, upload_file)
+
+- [ ] `press_key` with a `selector` targeting a real input, key `"Enter"` -- confirm any JS keydown/keyup listener on that field fires (e.g. a search box that submits on Enter via JS, not native form submission)
+- [ ] `press_key` with no `selector`, key `"Escape"`, on a page with a DOM-based (div+CSS) modal that closes via a JS keydown listener -- confirm it closes
+- [ ] `press_key` with `modifiers: {ctrl: true}` (or similar) on a page with a keyboard shortcut bound to that combination -- confirm the shortcut fires
+- [ ] `press_key` with a `selector` that matches nothing -- confirm `element_not_found`
+- [ ] `hover` on an element whose dropdown/tooltip is implemented via a JS `mouseenter`/`pointerenter` listener -- confirm it opens
+- [ ] `hover` on an element whose dropdown is implemented via pure CSS `:hover` -- confirm it does NOT open (this is the documented limitation, not a bug)
+- [ ] `drag_and_drop` on a page using native HTML5 DnD (`draggable="true"`) -- confirm the drop succeeds and `dragoverAccepted`/`dropHandled` are both `true`
+- [ ] `drag_and_drop` on a page using a mouse-simulated drag library -- confirm `ok: true` but `dragoverAccepted`/`dropHandled` are both `false` (documented limitation)
+- [ ] `drag_and_drop` with a `sourceSelector`/`targetSelector` that doesn't match anything -- confirm `source_not_found`/`target_not_found` respectively
+- [ ] `upload_file` with a small real file (under 700KB) targeting a real `<input type="file">` -- confirm the page sees the file (filename/preview visible) after the call
+- [ ] `upload_file` with a file over 700KB -- confirm `file_too_large`
+- [ ] `upload_file` targeting a selector that matches something other than a file input -- confirm `not_a_file_input`
+- [ ] `upload_file` with a nonexistent `filePath` -- confirm `file_read_failed`, not a hang or unhandled exception
