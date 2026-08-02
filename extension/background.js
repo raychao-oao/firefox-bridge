@@ -373,6 +373,23 @@ async function handleSearchHistory(msg) {
 const BOOKMARKS_ROOT_IDS = new Set(['toolbar_____', 'menu________', 'unfiled_____', 'mobile______']);
 const DEFAULT_BOOKMARKS_PARENT_ID = 'unfiled_____'; // "Other Bookmarks" — stable across Firefox versions
 
+// Fixed, non-locale-dependent labels for the three non-default bookmark
+// roots — NEVER use Firefox's own display title for these (that's
+// locale-dependent and unreliable, the same problem DEFAULT_BOOKMARKS_
+// PARENT_ID already avoids for "unfiled_____"). "unfiled_____" itself gets
+// no label — it's the default root, folder strings for bookmarks there stay
+// unprefixed for backward compatibility.
+const ROOT_LABELS_BY_ID = {
+  'toolbar_____': 'Bookmarks Toolbar',
+  'menu________': 'Bookmarks Menu',
+  'mobile______': 'Mobile Bookmarks',
+};
+const ROOT_ID_BY_LOWERCASE_LABEL = {
+  'bookmarks toolbar': 'toolbar_____',
+  'bookmarks menu': 'menu________',
+  'mobile bookmarks': 'mobile______',
+};
+
 async function getDefaultBookmarksParentId() {
   // Throws (caught by handleNativeMessage's try/catch, becomes a structured
   // {ok:false, error} response) if this Firefox version doesn't have the
@@ -381,37 +398,59 @@ async function getDefaultBookmarksParentId() {
   return DEFAULT_BOOKMARKS_PARENT_ID;
 }
 
+// If segments[0] matches one of the three special root labels
+// (case-insensitive), route there and consume that segment; otherwise
+// default to the "unfiled_____" root (Other Bookmarks), unchanged from
+// prior behavior.
+function resolveRootIdAndRemainingSegments(segments) {
+  if (segments.length > 0) {
+    const rootId = ROOT_ID_BY_LOWERCASE_LABEL[segments[0].toLowerCase()];
+    if (rootId) return { rootId, remaining: segments.slice(1) };
+  }
+  return { rootId: DEFAULT_BOOKMARKS_PARENT_ID, remaining: segments };
+}
+
 // Walks `segments` (already parsed/trimmed by parseFolderPath) one level at
-// a time from the default root. With create:true, missing segments are
-// created (used by add_bookmark). With create:false, returns null the
+// a time from the resolved root (default "Other Bookmarks", or one of the
+// three special roots if segments[0] matches a special root label — see
+// resolveRootIdAndRemainingSegments). With create:true, missing segments
+// are created (used by add_bookmark). With create:false, returns null the
 // moment a segment isn't found (used by list_bookmarks, which must not
-// create folders just by listing them).
+// create folders just by listing them). Returns the resolved `folder`
+// string (real node titles, root-labeled) alongside `parentId`/`created`.
 async function walkFolderPath(segments, { create }) {
-  let parentId = await getDefaultBookmarksParentId();
+  const { rootId, remaining } = resolveRootIdAndRemainingSegments(segments);
+  let parentId = rootId === DEFAULT_BOOKMARKS_PARENT_ID ? await getDefaultBookmarksParentId() : rootId;
   let created = false;
-  for (const segment of segments) {
+  const rootLabel = ROOT_LABELS_BY_ID[rootId];
+  const resolvedSegments = rootLabel ? [rootLabel] : [];
+  for (const segment of remaining) {
     const children = await browser.bookmarks.getChildren(parentId);
     const matches = children
       .filter((child) => child.type === 'folder' && child.title.trim().toLowerCase() === segment.toLowerCase())
       .sort((a, b) => a.dateAdded - b.dateAdded);
     if (matches.length > 0) {
       parentId = matches[0].id;
+      resolvedSegments.push(matches[0].title);
     } else if (create) {
       const folder = await browser.bookmarks.create({ parentId, title: segment });
       parentId = folder.id;
+      resolvedSegments.push(folder.title);
       created = true;
     } else {
       return null;
     }
   }
-  return { parentId, created };
+  return { parentId, created, folder: resolvedSegments.join('/') };
 }
 
 // Walks UP from a node's parentId to reconstruct its full folder path
-// string (e.g. "Tech/AI"), stopping at one of the four special root ids
-// (not included in the path). Used for list_bookmarks/search_bookmarks
-// results and for add_bookmark's duplicate response, where the caller
-// needs to know where an EXISTING bookmark actually lives.
+// string (e.g. "Tech/AI", or "Bookmarks Toolbar/Reading" for a non-default
+// root), stopping at one of the four special root ids (prefixed as a fixed
+// label instead, for the three non-default roots — see ROOT_LABELS_BY_ID).
+// Used for list_bookmarks/search_bookmarks results and for add_bookmark's
+// duplicate response, where the caller needs to know where an EXISTING
+// bookmark actually lives.
 async function getFolderPathString(parentId) {
   const titles = [];
   let currentId = parentId;
@@ -420,6 +459,8 @@ async function getFolderPathString(parentId) {
     titles.unshift(node.title);
     currentId = node.parentId;
   }
+  const rootLabel = ROOT_LABELS_BY_ID[currentId];
+  if (rootLabel) titles.unshift(rootLabel);
   return titles.join('/');
 }
 
@@ -472,7 +513,7 @@ async function handleAddBookmark(msg) {
   }
 
   const segments = parseFolderPath(msg.folder);
-  const { parentId, created } = await walkFolderPath(segments, { create: true });
+  const { parentId, created, folder } = await walkFolderPath(segments, { create: true });
   const node = await browser.bookmarks.create({ parentId, title: msg.title, url: msg.url });
 
   const result = {
@@ -480,7 +521,7 @@ async function handleAddBookmark(msg) {
     id: node.id,
     url: node.url,
     title: node.title,
-    folder: segments.join('/'),
+    folder,
     folderCreated: created,
   };
   if (isPrivate && needsTitleWarning(msg.title, msg.url, hostname)) {
@@ -496,16 +537,40 @@ async function collectBookmarks(node, pathSegments, out) {
     return;
   }
   if (node.children) {
-    // Don't fold the four named root containers (or the single absolute
-    // tree root above them, which has no parentId) into the displayed
-    // path — only real user-created folders count, matching
-    // getFolderPathString's root-stopping behavior.
-    const isRootContainer = BOOKMARKS_ROOT_IDS.has(node.id) || !node.parentId;
-    const nextPath = isRootContainer ? pathSegments : [...pathSegments, node.title];
+    // Descending into one of the four named root containers starts a fresh
+    // path with that root's fixed label (or no label for the default
+    // "unfiled_____" root); the single absolute tree root above them (no
+    // parentId) contributes nothing. Only real user-created folders are
+    // otherwise appended — matching getFolderPathString's root-stopping
+    // behavior.
+    let nextPath;
+    if (!node.parentId) {
+      nextPath = pathSegments;
+    } else if (BOOKMARKS_ROOT_IDS.has(node.id)) {
+      const rootLabel = ROOT_LABELS_BY_ID[node.id];
+      nextPath = rootLabel ? [rootLabel] : [];
+    } else {
+      nextPath = [...pathSegments, node.title];
+    }
     for (const child of node.children) {
       await collectBookmarks(child, nextPath, out);
     }
   }
+}
+
+// Hard cap on bookmark results returned to the caller. native-host's
+// MAX_MESSAGE_BYTES (1 MiB) is a protocol-level limit on the whole native
+// messaging response — an unbounded bookmark library (thousands of
+// entries) could overflow it and produce a connection-level framing error
+// instead of a graceful per-call failure. 1000 is the same order-of-
+// magnitude safety margin as search_history's 30-result cap, scaled up
+// since bookmarks carry less metadata per entry and hitting 1000 bookmarks
+// is rarer than hitting 30 history matches.
+const MAX_BOOKMARK_RESULTS = 1000;
+
+function capBookmarkResults(results) {
+  if (results.length <= MAX_BOOKMARK_RESULTS) return { results, truncated: false };
+  return { results: results.slice(0, MAX_BOOKMARK_RESULTS), truncated: true };
 }
 
 async function handleListBookmarks(msg) {
@@ -513,22 +578,27 @@ async function handleListBookmarks(msg) {
 
   if (segments.length === 0) {
     const [root] = await browser.bookmarks.getTree();
-    const results = [];
-    await collectBookmarks(root, [], results);
-    return { ok: true, results };
+    const collected = [];
+    await collectBookmarks(root, [], collected);
+    const { results, truncated } = capBookmarkResults(collected);
+    return truncated ? { ok: true, results, truncated } : { ok: true, results };
   }
 
   const walked = await walkFolderPath(segments, { create: false });
   if (!walked) return { ok: true, results: [] };
   const children = await browser.bookmarks.getChildren(walked.parentId);
   const bookmarks = children.filter((node) => node.type === 'bookmark');
-  return { ok: true, results: await Promise.all(bookmarks.map(toBookmarkResult)) };
+  const resolved = await Promise.all(bookmarks.map(toBookmarkResult));
+  const { results, truncated } = capBookmarkResults(resolved);
+  return truncated ? { ok: true, results, truncated } : { ok: true, results };
 }
 
 async function handleSearchBookmarks(msg) {
   const matches = await browser.bookmarks.search(msg.query);
   const bookmarks = matches.filter((node) => node.type === 'bookmark');
-  return { ok: true, results: await Promise.all(bookmarks.map(toBookmarkResult)) };
+  const resolved = await Promise.all(bookmarks.map(toBookmarkResult));
+  const { results, truncated } = capBookmarkResults(resolved);
+  return truncated ? { ok: true, results, truncated } : { ok: true, results };
 }
 
 async function handleScreenshot(msg, respond) {

@@ -72,6 +72,8 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `search_bookmarks(query)` finds a bookmark by a keyword in its `title`
 - [ ] `search_bookmarks(query)` finds a bookmark by a keyword in its `url`
 - [ ] A blacklisted site's bookmark still appears in both `list_bookmarks` and `search_bookmarks` results (verifies the deliberate no-filtering design, not an oversight)
+- [ ] A bookmark manually placed in the Bookmarks Toolbar (not Other Bookmarks) is reported by `list_bookmarks()`/`search_bookmarks` with `folder` starting with `"Bookmarks Toolbar"`; calling `add_bookmark`/`list_bookmarks(folder: "Bookmarks Toolbar/<same subfolder>")` with that exact string round-trips to the same location, not a new one under Other Bookmarks
+- [ ] With a very large number of bookmarks (or by temporarily lowering `MAX_BOOKMARK_RESULTS` for testing, then reverting), `list_bookmarks()`/`search_bookmarks` results are capped and the response includes `truncated: true` when the cap is hit
 
 ## Policy gate / blacklist
 - [ ] Pasting a full URL (e.g. `https://www.example.com/`) into the options page's hostname field gets normalized to a bare hostname (`www.example.com`) before being stored/listed — not silently stored as-is
