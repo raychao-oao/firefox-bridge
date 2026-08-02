@@ -275,6 +275,7 @@ async function handleNativeMessage(msg) {
       case 'move_to_pending_deletion':
         return respond(await handleMoveToPendingDeletion(msg));
       case 'click':
+        return respond(await handleClick(msg));
       case 'type':
       case 'read_page':
       case 'list_elements':
@@ -811,6 +812,74 @@ async function sendToFrame(tabId, frameId, msg) {
       return { ok: false, error: `content_script_unreachable: ${retryErr.message}` };
     }
   }
+}
+
+async function handleClick(msg) {
+  const gate = await privilegedGate(msg, { frameId: msg.frameId ?? 0 });
+  if (!gate.ok) return gate;
+
+  const tabBefore = await browser.tabs.get(msg.tabId);
+  const urlBefore = tabBefore.url;
+
+  // Longer than content-script's own 300ms observation window (not equal to
+  // it) -- gives room for messaging round-trip/serialization overhead so an
+  // ordinary, non-blocked click doesn't get misread as dialogOpened just
+  // because the response arrived a few ms late.
+  const CLICK_TIMEOUT_MS = 600;
+  // .catch(() => null) is defensive, not currently load-bearing: sendToFrame
+  // already catches its own send/inject/retry failures internally and
+  // resolves to {ok: false, error} rather than rejecting. This guards
+  // against a future change to sendToFrame reintroducing a real rejection
+  // path -- without it, an uncaught rejection on the losing side of the
+  // race below would surface as an unhandled-rejection warning. Resolving
+  // to null on an unexpected rejection folds it into the same "didn't hear
+  // back in time" branch as an actual timeout, which is the same
+  // information content practically-speaking (something not identifiably
+  // like a dialog kept the response from arriving).
+  const contentScriptResult = sendToFrame(msg.tabId, msg.frameId ?? 0, msg).catch(() => null);
+  const timeout = new Promise((resolve) => setTimeout(() => resolve(null), CLICK_TIMEOUT_MS));
+  const result = await Promise.race([contentScriptResult, timeout]);
+
+  // Read AFTER the race, not before it started -- a navigation triggered by
+  // the click may still be in flight at this point (tab.url hasn't updated
+  // yet), which would under-report navigated: false for a click whose
+  // effect genuinely was "started a navigation." Not fixed in this batch
+  // (would need its own wait/poll, overlapping with wait_for's job) --
+  // documented as a known false-negative source in the click tool
+  // description (Task 3) and the manual checklist (Task 4).
+  const tabAfter = await browser.tabs.get(msg.tabId);
+  const navigated = tabAfter.url !== urlBefore;
+
+  if (result === null) {
+    // content script never answered within the window. The dominant
+    // expected cause is a blocking native dialog (window.confirm/alert),
+    // which freezes the page's JS thread including the message listener
+    // that would reply -- but this is NOT the only cause. A genuinely slow
+    // synchronous click handler, a debugger breakpoint, Firefox throttling
+    // timers on a backgrounded tab, sendToFrame still being mid-retry
+    // (content-script injection into a not-yet-ready tab), or a
+    // navigation/document-teardown interrupting the response mid-flight
+    // would all look identical from here. dialogOpened is a "background
+    // didn't hear back in time" signal, not a certain "a dialog is open"
+    // signal -- documented as such in the tool description (Task 3).
+    return {
+      ok: true,
+      navigated,
+      dialogOpened: true,
+      domChanged: false,
+      newUrl: navigated ? tabAfter.url : undefined,
+    };
+  }
+
+  if (!result.ok) return result; // element_not_found -- pass through unchanged
+
+  return {
+    ok: true,
+    navigated,
+    dialogOpened: false,
+    domChanged: result.domChanged,
+    newUrl: navigated ? tabAfter.url : undefined,
+  };
 }
 
 async function forwardToContentScript(msg) {

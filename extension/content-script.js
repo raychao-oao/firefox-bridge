@@ -38,8 +38,21 @@ if (window.__firefoxBridgeContentScriptInstalled) {
     if (msg.type === 'click') {
       const el = document.querySelector(msg.selector);
       if (!el) return Promise.resolve({ ok: false, error: 'element_not_found' });
+      // domChanged is a deliberately coarse, best-effort signal (any
+      // childList/attribute mutation counts -- ads, clocks, and lazy-load
+      // can all trigger a false positive) -- not a precise diff. Good
+      // enough to tell an agent "something happened," per the design
+      // spec's own framing.
+      let domChanged = false;
+      const observer = new MutationObserver(() => { domChanged = true; });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true });
       el.click();
-      return Promise.resolve({ ok: true });
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          observer.disconnect();
+          resolve({ ok: true, domChanged });
+        }, 300);
+      });
     }
 
     if (msg.type === 'type') {
