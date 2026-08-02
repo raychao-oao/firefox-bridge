@@ -374,6 +374,26 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       });
     }
 
+    if (msg.type === 'scroll_to') {
+      let el;
+      try {
+        el = document.querySelector(msg.selector);
+      } catch (err) {
+        // document.querySelector THROWS on a syntactically invalid selector
+        // (e.g. an unclosed bracket) rather than returning null -- distinct
+        // from "valid selector, no match," same distinction list_elements'
+        // filter.container already makes for the same underlying reason.
+        return Promise.resolve({ ok: false, error: 'invalid_selector' });
+      }
+      if (!el) return Promise.resolve({ ok: false, error: 'element_not_found' });
+      // block:'center' rather than the browser default ('start') lowers the
+      // odds a sticky header/footer covers the element right after
+      // scrolling. behavior:'instant' matches this project's existing
+      // no-animation-delay convention for every other operation.
+      el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+      return Promise.resolve({ ok: true });
+    }
+
     return false; // not handled by this listener
   });
 

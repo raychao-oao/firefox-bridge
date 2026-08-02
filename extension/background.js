@@ -280,6 +280,8 @@ async function handleNativeMessage(msg) {
       case 'read_page':
       case 'list_elements':
         return respond(await forwardToContentScript(msg));
+      case 'scroll_to':
+        return respond(await forwardToContentScript(msg));
       case 'wait_for':
         return respond(await handleWaitFor(msg));
       case 'list_frames':
@@ -1142,6 +1144,15 @@ async function forwardToContentScript(msg) {
     return searchFramesForResult(msg, (frameId) => sendToFrame(msg.tabId, frameId, msg));
   }
   if (msg.type === 'wait_for') {
+    const frameId = msg.frameId ?? 0;
+    const gate = await privilegedGate(msg, { frameId });
+    if (!gate.ok) return gate;
+    return sendToFrame(msg.tabId, frameId, msg);
+  }
+  if (msg.type === 'scroll_to') {
+    // Single frame only, no cross-frame fallback search or aggregation --
+    // a selector is always frame-local, and there's exactly one frame the
+    // caller means to scroll within (default the top frame if unstated).
     const frameId = msg.frameId ?? 0;
     const gate = await privilegedGate(msg, { frameId });
     if (!gate.ok) return gate;

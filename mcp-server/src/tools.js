@@ -115,6 +115,19 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'scroll_to',
+    {
+      description:
+        "Scroll an element into view within a leased tab, identified by a CSS selector -- useful before `screenshot`/`click` when the target is currently outside the visible viewport. Always targets exactly one frame (no cross-frame fallback search, unlike `click`/`type`): pass `frameId` (from `list_frames` or a `list_elements` entry) to target a specific frame, defaults to the top frame (0). Uses `block: 'center'` so the element lands away from likely sticky headers/footers, and scrolls instantly (no animation delay, matching this project's other operations). Returns `element_not_found` if the selector is syntactically valid but matches nothing in the target frame, or `invalid_selector` if the selector itself has a CSS syntax error.",
+      inputSchema: { tabId: z.number(), selector: z.string(), frameId: z.number().optional() },
+    },
+    async ({ tabId, selector, frameId }) => {
+      const result = await bridgeClient.call({ type: 'scroll_to', tabId, selector, frameId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'screenshot',
     {
       description: 'Capture a screenshot of a leased tab. Writes the PNG to a local file and returns its absolute path -- read the file directly (e.g. with a file-reading tool that supports images) rather than expecting image bytes in this response.',
