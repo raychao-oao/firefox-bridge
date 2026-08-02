@@ -41,6 +41,26 @@ if (window.__firefoxBridgeContentScriptInstalled) {
     return bytes;
   }
 
+  // press_key's best-effort code/keyCode/which mapping for common control
+  // keys -- KeyboardEvent's constructor dictionary defaults `code`/`keyCode`
+  // to empty/0, which the modern `key`-only idiom never needed, but a lot of
+  // real-world page code (and jQuery's normalised `event.which`) still
+  // branches on the legacy fields. Not exhaustive by design: it covers the
+  // tool's stated primary use case (Escape/Enter/Tab/arrows/single chars),
+  // anything else keeps the KeyboardEventInit defaults.
+  const KEY_CODE_MAP = {
+    Enter: { code: 'Enter', keyCode: 13 },
+    Escape: { code: 'Escape', keyCode: 27 },
+    Tab: { code: 'Tab', keyCode: 9 },
+    Backspace: { code: 'Backspace', keyCode: 8 },
+    Delete: { code: 'Delete', keyCode: 46 },
+    ArrowUp: { code: 'ArrowUp', keyCode: 38 },
+    ArrowDown: { code: 'ArrowDown', keyCode: 40 },
+    ArrowLeft: { code: 'ArrowLeft', keyCode: 37 },
+    ArrowRight: { code: 'ArrowRight', keyCode: 39 },
+    ' ': { code: 'Space', keyCode: 32 },
+  };
+
   // domEpoch identifies "this DOM instance" -- scoped per content-script
   // execution, i.e. per FRAME (this project's manifest.json has
   // content_scripts.all_frames: true, so an iframe's domEpoch is
@@ -176,8 +196,29 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       // pointermove instead of the legacy mouse events -- dispatching only
       // one family would silently miss the other. mouseenter/pointerenter do
       // NOT bubble per spec, dispatched directly on the target either way.
-      const bubblingInit = { bubbles: true, cancelable: true, view: window };
-      const enterInit = { bubbles: false, cancelable: false, view: window };
+      // pointerId/isPrimary/pointerType are set explicitly because pointer-
+      // aware components commonly guard on `if (!e.isPrimary) return` or
+      // `if (e.pointerType !== 'mouse') ...` -- the PointerEventInit defaults
+      // (pointerId: 0, isPrimary: false, pointerType: '') fail both guards,
+      // which would silently degrade this dispatch to mouse-events-only.
+      // MouseEvent's constructor ignores these extra fields, so the same
+      // init object is safe to share with the MouseEvent dispatches below.
+      const bubblingInit = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        pointerId: 1,
+        isPrimary: true,
+        pointerType: 'mouse',
+      };
+      const enterInit = {
+        bubbles: false,
+        cancelable: false,
+        view: window,
+        pointerId: 1,
+        isPrimary: true,
+        pointerType: 'mouse',
+      };
       el.dispatchEvent(new PointerEvent('pointerover', bubblingInit));
       el.dispatchEvent(new MouseEvent('mouseover', bubblingInit));
       el.dispatchEvent(new PointerEvent('pointerenter', enterInit));
@@ -461,10 +502,29 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         // frame "should" have focus), so this path is always single-frame
         // (see background.js's routing for this case).
         target = document.activeElement || document.body;
+        // Mirrors the click handler's document.body null-guard: on a
+        // standalone XML/SVG document there may be neither an active element
+        // nor a body, and dispatching on a null target would throw
+        // synchronously -- surfacing as a misleading content_script_unreachable
+        // transport error instead of "nothing focusable here."
+        if (!target) return Promise.resolve({ ok: false, error: 'no_active_element' });
       }
       const modifiers = msg.modifiers || {};
+      // Best-effort code/keyCode/which -- see KEY_CODE_MAP above for scope.
+      let code = '';
+      let keyCode = 0;
+      if (KEY_CODE_MAP[msg.key]) {
+        ({ code, keyCode } = KEY_CODE_MAP[msg.key]);
+      } else if (msg.key.length === 1) {
+        const upper = msg.key.toUpperCase();
+        keyCode = upper.charCodeAt(0);
+        code = /[A-Z]/.test(upper) ? `Key${upper}` : /[0-9]/.test(upper) ? `Digit${upper}` : '';
+      }
       const eventInit = {
         key: msg.key,
+        code,
+        keyCode,
+        which: keyCode,
         bubbles: true,
         cancelable: true,
         shiftKey: !!modifiers.shift,
