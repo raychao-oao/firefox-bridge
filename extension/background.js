@@ -268,6 +268,8 @@ async function handleNativeMessage(msg) {
         return respond(await handleListBookmarks(msg));
       case 'search_bookmarks':
         return respond(await handleSearchBookmarks(msg));
+      case 'move_to_pending_deletion':
+        return respond(await handleMoveToPendingDeletion(msg));
       case 'click':
       case 'type':
       case 'read_page':
@@ -599,6 +601,80 @@ async function handleSearchBookmarks(msg) {
   const resolved = await Promise.all(bookmarks.map(toBookmarkResult));
   const { results, truncated } = capBookmarkResults(resolved);
   return truncated ? { ok: true, results, truncated } : { ok: true, results };
+}
+
+// Returns true if `candidateId` equals `startId`, or is any ancestor of it
+// (walking up startId's parentId chain). Used to reject moving a node into
+// itself or into one of its own descendants — either would create a cycle
+// in the bookmark tree.
+async function isNodeOrAncestor(candidateId, startId) {
+  let currentId = startId;
+  while (currentId) {
+    if (currentId === candidateId) return true;
+    const [node] = await browser.bookmarks.get(currentId);
+    currentId = node.parentId;
+  }
+  return false;
+}
+
+async function handleMoveToPendingDeletion(msg) {
+  const target = msg.target;
+  const hasId = typeof target?.id === 'string' && target.id.trim() !== '';
+  const hasFolder = typeof target?.folder === 'string' && target.folder.trim() !== '';
+  if (hasId === hasFolder) {
+    // Both given, or neither given (or target itself isn't a usable object) —
+    // hasId/hasFolder are both false in every one of those cases, and both
+    // true only when both fields were provided, so this one equality check
+    // catches all of them.
+    return { ok: false, error: 'invalid_target' };
+  }
+
+  let nodeId;
+  let node;
+  if (hasId) {
+    [node] = await browser.bookmarks.get(target.id);
+    if (node.type !== 'bookmark') {
+      // target.id can only legitimately be a bookmark id (see design spec's
+      // "輸入" section) — existing tools never return a folder id.
+      return { ok: false, error: 'id_is_not_a_bookmark' };
+    }
+    nodeId = node.id;
+  } else {
+    const segments = parseFolderPath(target.folder);
+    if (segments.length === 0) {
+      // target.folder was non-empty as a raw string (checked above) but
+      // parsed down to zero real path segments, e.g. "/" or "//".
+      return { ok: false, error: 'invalid_target' };
+    }
+    const walked = await walkFolderPath(segments, { create: false });
+    if (!walked) return { ok: false, error: 'folder_not_found' };
+    nodeId = walked.parentId;
+    [node] = await browser.bookmarks.get(nodeId);
+  }
+
+  if (BOOKMARKS_ROOT_IDS.has(nodeId)) {
+    return { ok: false, error: 'cannot_move_root' };
+  }
+
+  // Must be captured BEFORE move() below — move() mutates node.parentId.
+  const originalParentId = node.parentId;
+
+  const { parentId: pendingDeletionId } = await walkFolderPath(['Pending Deletion'], { create: true });
+
+  if (await isNodeOrAncestor(nodeId, pendingDeletionId)) {
+    return { ok: false, error: 'cannot_move_ancestor_of_destination' };
+  }
+
+  await browser.bookmarks.move(nodeId, { parentId: pendingDeletionId });
+
+  return {
+    ok: true,
+    id: nodeId,
+    type: node.type,
+    title: node.title,
+    from: await getFolderPathString(originalParentId),
+    to: 'Pending Deletion',
+  };
 }
 
 async function handleScreenshot(msg, respond) {

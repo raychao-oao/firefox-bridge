@@ -75,6 +75,20 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] A bookmark manually placed in the Bookmarks Toolbar (not Other Bookmarks) is reported by `list_bookmarks()`/`search_bookmarks` with `folder` starting with `"Bookmarks Toolbar"`; calling `add_bookmark`/`list_bookmarks(folder: "Bookmarks Toolbar/<same subfolder>")` with that exact string round-trips to the same location, not a new one under Other Bookmarks
 - [ ] With a very large number of bookmarks (or by temporarily lowering `MAX_BOOKMARK_RESULTS` for testing, then reverting), `list_bookmarks()`/`search_bookmarks` results are capped and the response includes `truncated: true` when the cap is hit
 
+## Bookmark cleanup
+- [ ] `move_to_pending_deletion` called with `target` giving both `id` and `folder`, or neither, or an empty/whitespace-only string for either — all return `invalid_target`
+- [ ] Called with `target.folder` set to `"/"` or `"//"` (non-empty raw string, but zero real path segments) — returns `invalid_target`
+- [ ] Called with a real bookmark's `id` — that bookmark disappears from its original folder and appears under "Pending Deletion"; `from`/`to` fields are correct
+- [ ] Called with a real folder path (containing sub-bookmarks) via `target.folder` — the entire folder, with all its contents, moves under "Pending Deletion"; nothing inside is lost
+- [ ] Called with a `target.folder` path that doesn't exist — returns `folder_not_found`
+- [ ] Called with `target.folder: "Bookmarks Toolbar"` (a root label alone, no sub-path) — returns `cannot_move_root`
+- [ ] Called with `target.folder: "Pending Deletion"` (after it already exists) — returns `cannot_move_ancestor_of_destination`
+- [ ] Called twice in a row on a bookmark already inside "Pending Deletion" — the second call succeeds (not an error), `from`/`to` both read "Pending Deletion"
+- [ ] With two same-named folders manually created at the same level in Firefox, calling `target.folder` with that name moves the one with the earlier `dateAdded`, not an unpredictable one
+- [ ] First call ever (no "Pending Deletion" folder exists yet) auto-creates it; a second call reuses the same folder rather than creating a duplicate
+- [ ] Moving a bookmark that has Tags/Keyword set (visible in Firefox's bookmark manager) — after the move, confirm in the bookmark manager that Tags/Keyword are still present (this is the spec's stated "inference, not a verified guarantee" — this check is what turns it into a verified fact)
+- [ ] Called with a nonexistent/already-deleted `id` — returns a structured error, not a hang or unhandled exception
+
 ## Policy gate / blacklist
 - [ ] Pasting a full URL (e.g. `https://www.example.com/`) into the options page's hostname field gets normalized to a bare hostname (`www.example.com`) before being stored/listed — not silently stored as-is
 - [ ] Pasting something that isn't a valid hostname (e.g. empty after stripping, or garbage input) shows an inline error and does NOT get added to the list
