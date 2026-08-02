@@ -359,6 +359,15 @@ async function createTabAndWaitForCommit(createTab, timeoutMs = 3000) {
 
   const onCommitted = (details) => {
     if (details.frameId !== 0) return;
+    // A freshly created tab can fire an initial about:blank commit before
+    // the real navigation commits. createTabAndWaitForCommit() is only ever
+    // called when shouldWaitForCommit is true, which already guarantees the
+    // requested destination is NOT about:blank -- so an about:blank commit
+    // here is never the one we're waiting for. Treating it as satisfying
+    // would resolve committed: true while the tab is still on about:blank,
+    // reintroducing the stale-url bug this helper exists to fix (but now
+    // without the urlPending signal that would otherwise flag it).
+    if (details.url === 'about:blank') return;
     if (tabId === null) {
       pendingCommits.push(details.tabId);
       return;
@@ -438,7 +447,18 @@ async function handleAcquireTab(msg) {
 
     if (shouldWaitForCommit) {
       const result = await createTabAndWaitForCommit(createTab);
-      tab = result.committed ? await browser.tabs.get(result.tab.id) : result.tab;
+      // Re-fetch on BOTH paths: even on timeout, a fresher url might be one
+      // browser.tabs.get() call away (the commit event could simply have
+      // been missed while the navigation actually completed). Guard against
+      // the tab having closed during the wait -- browser.tabs.get() throws
+      // in that case, and falling back to result.tab (rather than letting
+      // the error propagate to a generic {ok: false}) preserves the normal
+      // urlPending-on-timeout response with a lease still recorded.
+      try {
+        tab = await browser.tabs.get(result.tab.id);
+      } catch {
+        tab = result.tab; // tab closed during the wait
+      }
       urlPending = !result.committed;
     } else {
       tab = await createTab();
