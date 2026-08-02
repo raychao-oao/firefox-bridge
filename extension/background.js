@@ -36,6 +36,13 @@ function truncateField(str) {
 // envelope inside the 1 MiB frame limit.
 const SCREENSHOT_CHUNK_CHARS = 700 * 1024;
 
+// Firefox has a known single-capture ceiling on each dimension -- exceeding
+// it fails outright (not a silent clamp). Checked up front so a too-large
+// fullPage capture gets a clear, structured error instead of an opaque
+// native exception surfacing from browser.tabs.captureTab.
+// https://bugzilla.mozilla.org/show_bug.cgi?id=1784915
+const MAX_CAPTURE_DIMENSION = 32767;
+
 // Per-session tab lease bookkeeping. Reset entirely whenever the native
 // port reconnects (spec: "重連只恢復 transport，不恢復邏輯 session").
 let leaseOwner = new Map(); // tabId -> sessionId
@@ -868,7 +875,60 @@ async function handleScreenshot(msg, respond) {
   const gate = await privilegedGate(msg);
   if (!gate.ok) return respond(gate);
 
-  const dataUrl = await browser.tabs.captureTab(msg.tabId, { format: 'png' });
+  const captureOptions = { format: 'png' };
+  if (msg.fullPage) {
+    let dims;
+    try {
+      const [{ result }] = await browser.scripting.executeScript({
+        target: { tabId: msg.tabId },
+        // Three-way max, not just documentElement: some pages' body/
+        // documentElement scroll dimensions disagree depending on layout
+        // (quirks mode, height:100% chains, etc.) -- taking the max of all
+        // three is the only way to reliably get the true full-page extent.
+        func: () => ({
+          width: Math.max(
+            document.documentElement.scrollWidth,
+            document.body ? document.body.scrollWidth : 0,
+            window.innerWidth
+          ),
+          height: Math.max(
+            document.documentElement.scrollHeight,
+            document.body ? document.body.scrollHeight : 0,
+            window.innerHeight
+          ),
+        }),
+      });
+      dims = result;
+    } catch (err) {
+      return respond({ ok: false, error: `screenshot_dimensions_failed: ${err.message}` });
+    }
+    // Guard against a malformed/empty injection result (e.g. a page that
+    // rejected injection in some edge case) before trusting dims.width --
+    // caught by use-codex plan review.
+    if (!dims || typeof dims.width !== 'number' || typeof dims.height !== 'number') {
+      return respond({ ok: false, error: 'screenshot_dimensions_failed: no result from page' });
+    }
+    if (dims.width > MAX_CAPTURE_DIMENSION || dims.height > MAX_CAPTURE_DIMENSION) {
+      return respond({ ok: false, error: 'screenshot_too_large' });
+    }
+    // rect is relative to the PAGE, not the current scroll position/viewport
+    // (MDN, extensionTypes.ImageDetails.rect) -- no scrolling or multi-shot
+    // stitching needed, Firefox captures the full document area directly.
+    //
+    // scale:1 is required, not optional: captureTab defaults scale to the
+    // display's devicePixelRatio, so on a HiDPI/retina display (DPR 2) a
+    // 20000x20000 CSS-pixel rect would render as a ~40000x40000 output
+    // canvas -- silently blowing past MAX_CAPTURE_DIMENSION even though the
+    // CSS-pixel check above passed. Forcing scale:1 makes the CSS-pixel
+    // dimensions checked above equal to the actual output canvas dimensions,
+    // which is what the 32767px ceiling actually applies to. Found by
+    // use-codex plan review -- an earlier draft checked CSS pixels but left
+    // captureTab's scale at its DPR-dependent default.
+    captureOptions.rect = { x: 0, y: 0, width: dims.width, height: dims.height };
+    captureOptions.scale = 1;
+  }
+
+  const dataUrl = await browser.tabs.captureTab(msg.tabId, captureOptions);
 
   // Chunked transfer: a single message carrying a full retina PNG would blow
   // past the 1 MiB native-messaging cap on THIS hop. Every chunk carries the

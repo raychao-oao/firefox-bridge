@@ -130,11 +130,11 @@ export function registerTools(server, bridgeClient) {
   server.registerTool(
     'screenshot',
     {
-      description: 'Capture a screenshot of a leased tab. Writes the PNG to a local file and returns its absolute path -- read the file directly (e.g. with a file-reading tool that supports images) rather than expecting image bytes in this response.',
-      inputSchema: { tabId: z.number() },
+      description: 'Capture a screenshot of a leased tab. Writes the PNG to a local file and returns its absolute path -- read the file directly (e.g. with a file-reading tool that supports images) rather than expecting image bytes in this response. Pass `fullPage: true` to capture the entire scrollable page instead of just the current viewport -- Firefox captures the full document area directly (best-effort; no scrolling or multi-shot stitching involved, and forced to 1x scale regardless of display DPI so the size check below stays accurate). Known limitation shared with `list_elements`: a fullPage capture only shows content the browser has actually rendered into the DOM -- virtualized/windowed UIs that only mount their visible rows will not "fill in" the rest. Fails with `screenshot_too_large` if either page dimension exceeds Firefox\'s ~32767px single-capture ceiling.',
+      inputSchema: { tabId: z.number(), fullPage: z.boolean().optional() },
     },
-    async ({ tabId }) => {
-      const captureResult = await bridgeClient.call({ type: 'screenshot', tabId });
+    async ({ tabId, fullPage }) => {
+      const captureResult = await bridgeClient.call({ type: 'screenshot', tabId, fullPage });
       if (!captureResult.ok) return toolResult(captureResult);
       const payload = await bridgeClient.call({ type: 'payload-read', handle: captureResult.handle });
       if (!payload.ok) return toolResult(payload);
