@@ -83,9 +83,11 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `list_elements({filter: {text: '<某個已知元素的 label 子字串>'}})`，確認只回傳 label 包含該子字串的元素（大小寫不敏感——用一個大小寫不同的子字串再測一次）
 - [ ] `list_elements({filter: {text: '<一個只出現在某元素 label 第 100 個字元之後的子字串，需要構造一個 label 很長的測試元素>'}})`，確認該元素被正確匹配到——驗證 filter 比對的是完整 label，不是已經截斷成 100 字元的 `text` 欄位
 - [ ] `list_elements({filter: {tag: 'input', type: 'checkbox'}})`，確認只回傳 checkbox 類型的 input，其他 tag/type 都被排除
+- [ ] `list_elements({filter: {text: '', tag: '', type: ''}})`，確認行為跟完全不傳 `filter` 的 `list_elements()` 一致——空字串應被視為「沒有限制條件」，不是「什麼都不匹配」
+- [ ] `list_elements({filter: {container: '<一個已知只包含少數幾個元素的容器 selector>', text: '<容器內某元素 label 的子字串>'}})`（container 與 text 同時給），確認只回傳「同時滿足在容器內、且 label 符合 text」的元素——驗證 container 也正確參與 AND 組合，不是只有 text/tag/type 三者之間才有 AND 邏輯
 - [ ] `list_elements({filter: {container: '<一個已知只包含少數幾個元素的容器 selector>'}})`，確認只回傳該容器底下的元素，容器外的元素（即使同樣符合 `CANDIDATE_SELECTOR`）不出現；如果容器元素本身也符合 `CANDIDATE_SELECTOR`（例如容器剛好是個 `<a>`），確認容器本身不算在結果裡，只有它「底下」的子孫算
-- [ ] `list_elements({filter: {container: '<一個合法 CSS 語法、但確定目前頁面上不存在的 selector，例如 "#definitely-not-here">'}})`，確認回傳 `{ok: true, elements: []}`，不是錯誤
-- [ ] `list_elements({filter: {container: '<一個語法上就不合法的 CSS selector，例如 ">>>invalid<<<">'}})`，確認回傳結構化的 `{ok: false, error: 'invalid_container_selector'}`，不是未處理的例外或讓整個呼叫掛掉
+- [ ] `list_elements({filter: {container: '<一個合法 CSS 語法、但確定目前頁面上不存在的 selector，例如 "#definitely-not-here">'}})`，確認回傳空結果，不是錯誤（實際形狀依有沒有帶 `frameId` 而不同：帶 `frameId` 時是 `{ok: true, elements: []}`；不帶時是 `{ok: true, frames: [{..., elements: [], totalCandidates: 0}]}`——兩種情境都測一次）
+- [ ] `list_elements({filter: {container: '<一個語法上就不合法的 CSS selector，例如 ">>>invalid<<<">'}})`，確認回傳結構化錯誤，不是未處理的例外或讓整個呼叫掛掉（實際形狀依有沒有帶 `frameId` 而不同：帶 `frameId` 時是頂層 `{ok: false, error: 'invalid_container_selector'}`；不帶時整體呼叫仍是 `ok: true`，錯誤出現在該 frame 對應的 `frameErrors[]` 項目裡——兩種情境都測一次）
 - [ ] 在一個候選元素數量明顯超過 300 的頁面，用 `filter` 縮小到一個已知在候選清單「後段」的元素（不加 filter 時會被 300 上限砍掉），確認加了 filter 後這個元素出現在結果裡——驗證 filter 是在候選階段生效、且在 `MAX_ELEMENTS` 判斷之前
 - [ ] 同一個 `list_elements` 呼叫兩次（沒有中間發生導覽），確認兩次回傳的 `domEpoch` 相同
 - [ ] 呼叫 `list_elements` → `navigate` 到另一個網址 → 再呼叫 `list_elements`，確認前後兩次 `domEpoch` 不同
