@@ -98,6 +98,19 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] 同樣情境但呼叫 `click({selector})`（不傳 `expectedDomEpoch`），確認行為跟修改前一致（不會是 `stale_selector`）
 - [ ] 用當下正確的 `domEpoch` 呼叫 `click({selector, expectedDomEpoch: <正確值>, frameId: <對應的 frameId>})`，確認正常執行，不被誤判成 stale
 - [ ] `type` 比照上面兩項 `click` 的測試（正確 epoch 正常執行、錯誤 epoch 回傳 `stale_selector` 且不設值）
+- [ ] 在一個有 iframe 的頁面，用 `list_elements`（不傳 `frameId`，多 frame 聚合模式）拿到一個只存在於 iframe 裡的元素的 selector 跟 `frameId`，接著呼叫 `click({selector})`（**不傳** `frameId`），確認點擊成功——這是這次修復的核心迴歸測試
+- [ ] 同樣情境但呼叫 `click({selector, frameId})`（**有傳**正確的 `frameId`），確認行為不變、一樣成功
+- [ ] 對一個只存在於 top frame（frame 0）的元素呼叫 `click({selector})`（不傳 `frameId`），確認第一次嘗試就成功、耗時量級跟修改前相近（不需要跨 frame 搜尋）
+- [ ] 對一個確定在任何 frame 都不存在的 selector 呼叫 `click({selector})`，確認最終回傳 `element_not_found`（不是卡住或拋出未預期例外）
+- [ ] 在一個有多個（3 個以上）iframe、但沒有任何對話框的頁面，對一個只存在於「最後一個」被搜尋到的 frame 的元素呼叫 `click({selector})`（不傳 `frameId`），確認回應的 `dialogOpened` 是 `false`——這是驗證整個搜尋共用一個 timeout 這個 bug 已修好的直接迴歸測試：如果這個 bug 還在，多個 frame 依序嘗試的總耗時很可能超過 600ms，錯誤回報 `dialogOpened: true`
+- [ ] 構造一個會同步呼叫 `window.confirm(...)` 的按鈕，放在**非 frame 0** 的某個 iframe 裡，用該按鈕的 selector 呼叫 `click({selector})`（不傳 `frameId`），確認最終回應 `dialogOpened: true`（驗證「每個 frame 各自 race」的機制對非 frame-0 的情況一樣有效）
+- [ ] 構造一個超過 `FRAME_SEARCH_CAP`（20）個 iframe、目標元素確定不在前 20 個裡的頁面（如果能構造出這種測試頁），確認呼叫不會因為過多 frame 而無限期變慢或掛住，且最終回應包含 `frameSearchIncomplete: true`（驗證達到上限也算不窮盡，不是只有 policy 擋下才算）
+- [ ] 對一個目標元素位於「這個 session 沒有權限存取（黑名單擋下）」的 iframe 裡的頁面呼叫 `click({selector})`（不傳 `frameId`），確認最終回應包含 `frameSearchIncomplete: true`，不是誤導性地暗示「窮盡搜尋後真的找不到」
+- [ ] 構造一個「frame 0 的 content script 需要重新注入（例如剛過 reload、還沒收到過任何訊息）而導致明顯延遲」的情境，觀察 `dialogOpened: true` 是否可能在沒有任何對話框的情況下出現——這是驗證「timeout 不是 el.click() 已派送的證明，只是 best-effort 推測」這個限制確實存在、且已經在文件/描述裡誠實揭露，不是要求修掉它（這輪的設計選擇是接受這個已知的不確定性，不引入新機制去消除它）
+- [ ] `type` 比照上面「iframe 元素成功」「frameId 不變」「element_not_found」三項 `click` 的測試
+- [ ] 對一個 iframe 元素呼叫 `click({selector, expectedDomEpoch: <該 iframe 的 domEpoch>})`（不傳 `frameId`），確認 `stale_selector`/`domEpoch` 相關邏輯在跨 frame 搜尋出的正確 frame 上正常運作（即 `expectedDomEpoch` 是跟「實際找到元素的那個 frame」比對，不是跟 frame 0 比對）——這是驗證 `stale_selector` 也要觸發搜尋這個修正的直接迴歸測試
+- [ ] `navigate` 到另一個網址（讓所有 frame 的 `domEpoch` 都換新），用舊的、已經不對應任何 frame 的 `expectedDomEpoch` 呼叫 `click({selector})`（不傳 `frameId`），確認最終回傳 `stale_selector`（不是誤判成 `element_not_found`，也不是卡在某個中間狀態）
+- [ ] `wait_for` 對一個只存在於 iframe 的 selector、不傳 `frameId` 呼叫，確認行為維持不變（`timedOut: true`，因為 `wait_for` 明確不在這輪修復範圍內）——這是確認範圍限定正確的迴歸測試
 
 ### Frames (`content_scripts` is `all_frames: true`)
 - [ ] `list_frames` on a page with no iframes returns exactly one frame (`frameId: 0`)
