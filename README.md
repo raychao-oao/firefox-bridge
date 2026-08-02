@@ -33,17 +33,20 @@ you're already using, logged into whatever you're logged into.
   path instead of inline in messages, keeping under the native-messaging size cap.
   `screenshot` itself writes the captured PNG to a local file and returns its absolute
   path — read the file directly rather than expecting image bytes in the tool response.
-- **Frame-aware**: `click`/`type`/`read_page`/`list_elements` can target a specific
-  `<iframe>` (discovered via `list_frames`); each frame is gated by its own blacklist
-  policy independently, so an allowed top-level page can't become a path to read a
-  blacklisted embedded frame.
+  Pass `fullPage: true` to capture the entire scrollable page in one shot instead of just
+  the current viewport.
+- **Frame-aware**: `click`/`type`/`read_page`/`list_elements`/`scroll_to` can target a
+  specific `<iframe>` (discovered via `list_frames`); each frame is gated by its own
+  blacklist policy independently, so an allowed top-level page can't become a path to
+  read a blacklisted embedded frame.
 
 ## Tools
 
 `navigate`, `click`, `type`, `read_page`, `list_elements`, `list_frames`, `screenshot`,
-`start_console`/`get_console`, `start_network`/`get_network`, `acquire_tab`/`release_tab`,
-`list_tabs`, `search_history`, `add_bookmark`, `list_bookmarks`, `search_bookmarks`,
-`move_to_pending_deletion`, `list_containers`, `create_container`, `wait_for`.
+`scroll_to`, `start_console`/`get_console`, `start_network`/`get_network`,
+`acquire_tab`/`release_tab`, `list_tabs`, `search_history`, `add_bookmark`,
+`list_bookmarks`, `search_bookmarks`, `move_to_pending_deletion`, `list_containers`,
+`create_container`, `wait_for`.
 
 `list_elements` discovers real CSS selectors for interactive elements instead of guessing
 blindly — each one is guaranteed to match exactly the inspected element on a follow-up
