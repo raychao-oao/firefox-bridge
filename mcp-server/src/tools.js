@@ -51,7 +51,7 @@ export function registerTools(server, bridgeClient) {
     'type',
     {
       description:
-        'Type text into an element in a leased tab, identified by a CSS selector. Pass `frameId` to target a specific frame (get it from `list_frames` or a `list_elements` entry) — defaults to the top frame (0), which does NOT reach into iframes. Optionally pass `expectedDomEpoch` (from a prior `list_elements` call, same `frameId`) to guard against acting on a stale selector — if the page has since changed (navigation, bfcache restoration), this returns `stale_selector` and does NOT type anything.',
+        'Type text into an element in a leased tab, identified by a CSS selector. This ALWAYS overwrites the element\'s existing value with `text` — there is no append/insert-at-cursor mode, whatever was there before is replaced. Pass `frameId` to target a specific frame (get it from `list_frames` or a `list_elements` entry) — defaults to the top frame (0), which does NOT reach into iframes. Optionally pass `expectedDomEpoch` (from a prior `list_elements` call, same `frameId`) to guard against acting on a stale selector — if the page has since changed (navigation, bfcache restoration), this returns `stale_selector` and does NOT type anything.',
       inputSchema: { tabId: z.number(), selector: z.string(), text: z.string(), frameId: z.number().optional(), expectedDomEpoch: z.string().optional() },
     },
     async ({ tabId, selector, text, frameId, expectedDomEpoch }) => {

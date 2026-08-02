@@ -30,6 +30,7 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `navigate` to a normal (non-blacklisted) URL succeeds
 - [ ] `click` on a known selector (test against a simple local HTML page) actually clicks
 - [ ] `type` on an input field sets its value and fires `input`/`change` (verify via a page that echoes input state)
+- [ ] `type` on an input field that already has existing text confirms the existing text is fully replaced (not appended to) — matches the tool description's "ALWAYS overwrites" claim
 - [ ] 對一個沒有 `href`、點擊後不會觸發任何導覽或其他效果的連結（例如 `<a href="#">`）呼叫 `click`，確認 `navigated: false`、`dialogOpened: false`
 - [ ] 對一個點擊後會觸發 `window.location.href` 導覽（不是 `<a>` 標籤，是 JS 導覽）的按鈕呼叫 `click`，確認 `navigated: true` 且 `newUrl` 是導覽後的網址
 - [ ] 已知的 false negative（非 bug，勿回報）：對上一項的 JS 導覽按鈕呼叫 `click` 時，若導覽在 background 讀取 `tabAfter`（點擊後約 600ms 內）當下還沒完成、`tab.url` 尚未更新，`navigated` 可能回報 `false`。這是 `extension/background.js` `handleClick` 註解中記載、已知且可接受的限制，不需要額外用 `wait_for` 之類的機制去 poll 才能拿到最終值——若觀察到這個現象請視為預期行為，不要當成 bug 回報
