@@ -940,6 +940,78 @@ async function sendToFrame(tabId, frameId, msg) {
   }
 }
 
+// Shared by handleClick and forwardToContentScript's `type` case. Given a
+// per-frame attempt function `attemptFrame(frameId)` that returns a
+// content-script response object, tries frame 0 first, falls back to
+// searching other frames (capped at FRAME_SEARCH_CAP) for the first one
+// where the message actually resolves -- either `ok: true`, or a
+// non-retryable error that proves the element WAS found in that frame
+// (e.g. option_not_found on a <select>).
+//
+// FRAME_SEARCH_CAP bounds worst-case latency/frame count on a pathological
+// page with many iframes. No existing precedent in this codebase for a
+// frame-count cap specifically (MAX_ELEMENTS/HEURISTIC_SCAN_CAP bound
+// per-frame element scanning, not frame count) -- 20 is a conservative,
+// arbitrary choice: comfortably above any normal page's iframe count,
+// low enough that a pathological page can't make one click/type call
+// enumerate hundreds of frames.
+const FRAME_SEARCH_CAP = 20;
+
+async function searchFramesForResult(msg, attemptFrame) {
+  const RETRYABLE_ERRORS = new Set(['element_not_found', 'stale_selector']);
+  // stale_selector is retryable for the same reason established earlier in
+  // this spec: expectedDomEpoch may have been intended for the frame the
+  // element actually lives in, not frame 0, so a mismatch on frame 0 alone
+  // doesn't prove the page is genuinely stale everywhere.
+
+  const gate0 = await privilegedGate(msg, { frameId: 0 });
+  if (!gate0.ok) return gate0;
+  const result0 = await attemptFrame(0);
+  if (result0.ok || !RETRYABLE_ERRORS.has(result0.error)) return result0;
+
+  let frameList;
+  try {
+    frameList = await browser.webNavigation.getAllFrames({ tabId: msg.tabId });
+  } catch (err) {
+    // Couldn't enumerate frames -- this is also an incomplete search (we
+    // never even tried beyond frame 0), not a confirmed "not found."
+    return { ...result0, frameSearchIncomplete: true };
+  }
+
+  // Tracks every reason the search might not be exhaustive -- a
+  // policy-blocked frame, hitting FRAME_SEARCH_CAP, or getAllFrames itself
+  // failing all mean a final "not found" should NOT be read as "definitely
+  // not on this page." use-codex review on an earlier draft only tracked
+  // the policy-skip case; capped-out and enumeration-failure are the same
+  // class of incompleteness and must set the same flag.
+  let incomplete = false;
+  let framesTried = 1; // frame 0 already counted
+  for (const frame of frameList) {
+    if (frame.frameId === 0) continue;
+    if (framesTried >= FRAME_SEARCH_CAP) {
+      incomplete = true;
+      break;
+    }
+    const frameGate = await privilegedGate(msg, { frameId: frame.frameId });
+    if (!frameGate.ok) {
+      incomplete = true;
+      continue;
+    }
+    framesTried += 1;
+    const result = await attemptFrame(frame.frameId);
+    if (result.ok || !RETRYABLE_ERRORS.has(result.error)) return result;
+  }
+
+  if (incomplete) {
+    // Not found in any frame this search actually reached -- but the
+    // search was NOT exhaustive (policy block, cap, or enumeration
+    // failure), so say so explicitly rather than letting a generic
+    // element_not_found imply "definitely not on this page."
+    return { ...result0, frameSearchIncomplete: true };
+  }
+  return result0;
+}
+
 async function handleClick(msg) {
   const gate = await privilegedGate(msg, { frameId: msg.frameId ?? 0 });
   if (!gate.ok) return gate;
@@ -952,6 +1024,7 @@ async function handleClick(msg) {
   // ordinary, non-blocked click doesn't get misread as dialogOpened just
   // because the response arrived a few ms late.
   const CLICK_TIMEOUT_MS = 600;
+
   // Known limitation of sendToFrame's retry-and-reinject logic: if a click
   // triggers a navigation and the original browser.tabs.sendMessage inside
   // sendToFrame rejects due to the frame's document tearing down mid-flight,
@@ -960,20 +1033,41 @@ async function handleClick(msg) {
   // a second time against whatever now matches msg.selector in the new
   // document. This is pre-existing behavior (not a regression introduced here)
   // and is accepted as a known limitation — not fixed in this task.
-  //
-  // .catch(() => null) is defensive, not currently load-bearing: sendToFrame
-  // already catches its own send/inject/retry failures internally and
-  // resolves to {ok: false, error} rather than rejecting. This guards
-  // against a future change to sendToFrame reintroducing a real rejection
-  // path -- without it, an uncaught rejection on the losing side of the
-  // race below would surface as an unhandled-rejection warning. Resolving
-  // to null on an unexpected rejection folds it into the same "didn't hear
-  // back in time" branch as an actual timeout, which is the same
-  // information content practically-speaking (something not identifiably
-  // like a dialog kept the response from arriving).
-  const contentScriptResult = sendToFrame(msg.tabId, msg.frameId ?? 0, msg).catch(() => null);
-  const timeout = new Promise((resolve) => setTimeout(() => resolve(null), CLICK_TIMEOUT_MS));
-  const result = await Promise.race([contentScriptResult, timeout]);
+  const attemptFrame = async (frameId) => {
+    // .catch(() => null) is defensive, not currently load-bearing: sendToFrame
+    // already catches its own send/inject/retry failures internally and
+    // resolves to {ok: false, error} rather than rejecting. This guards
+    // against a future change to sendToFrame reintroducing a real rejection
+    // path.
+    const contentScriptResult = sendToFrame(msg.tabId, frameId, msg).catch(() => null);
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), CLICK_TIMEOUT_MS));
+    const raced = await Promise.race([contentScriptResult, timeout]);
+    if (raced === null) {
+      // This SPECIFIC frame didn't answer in time. This is a best-effort
+      // heuristic, not a certainty: sendToFrame's own injection/retry path
+      // can also eat the full budget before the content-script listener
+      // ever starts, with no click dispatched at all -- we cannot
+      // distinguish a real dialog from injection latency here. Still
+      // treated as terminal (not retryable): even in the injection-delay
+      // case, trying ANOTHER frame risks double-dispatching a click if the
+      // original sendToFrame call is still in flight and eventually
+      // succeeds after this function has already moved on -- accepting a
+      // possible missed click in the rare true-injection-delay case is the
+      // safer failure mode than accepting a possible double click.
+      return { ok: true, dialogOpened: true, domChanged: false };
+    }
+    return raced;
+  };
+
+  // No second gate call needed here for the explicit-frameId path -- the
+  // gate above already checked exactly this frameId (msg.frameId ?? 0
+  // resolves to msg.frameId when it's explicitly set). For the
+  // omitted-frameId path, searchFramesForResult's own internal gate0 check
+  // (frameId: 0) becomes a harmless, redundant re-check of the same frame
+  // already gated above -- acceptable, not a new correctness issue.
+  const result = msg.frameId != null
+    ? await attemptFrame(msg.frameId)
+    : await searchFramesForResult(msg, attemptFrame);
 
   // Read AFTER the race, not before it started -- a navigation triggered by
   // the click may still be in flight at this point (tab.url hasn't updated
@@ -981,46 +1075,47 @@ async function handleClick(msg) {
   // effect genuinely was "started a navigation." Not fixed in this batch
   // (would need its own wait/poll, overlapping with wait_for's job) --
   // documented as a known false-negative source in the click tool
-  // description (Task 3) and the manual checklist (Task 4).
+  // description (Task 2) and the manual checklist (Task 3).
   const tabAfter = await browser.tabs.get(msg.tabId);
   const navigated = tabAfter.url !== urlBefore;
 
-  if (result === null) {
-    // content script never answered within the window. The dominant
-    // expected cause is a blocking native dialog (window.confirm/alert),
-    // which freezes the page's JS thread including the message listener
-    // that would reply -- but this is NOT the only cause. A genuinely slow
-    // synchronous click handler, a debugger breakpoint, Firefox throttling
-    // timers on a backgrounded tab, sendToFrame still being mid-retry
-    // (content-script injection into a not-yet-ready tab), or a
-    // navigation/document-teardown interrupting the response mid-flight
-    // would all look identical from here. dialogOpened is a "background
-    // didn't hear back in time" signal, not a certain "a dialog is open"
-    // signal -- documented as such in the tool description (Task 3).
-    return {
-      ok: true,
-      navigated,
-      dialogOpened: true,
-      domChanged: false,
-      newUrl: navigated ? tabAfter.url : undefined,
-    };
-  }
-
-  if (!result.ok) return result; // element_not_found -- pass through unchanged
+  if (!result.ok) return result; // element_not_found (all searched frames exhausted) / stale_selector (genuinely, everywhere) / policy error -- pass through unchanged
 
   return {
     ok: true,
     navigated,
-    dialogOpened: false,
-    domChanged: result.domChanged,
+    dialogOpened: Boolean(result.dialogOpened),
+    domChanged: Boolean(result.domChanged),
     newUrl: navigated ? tabAfter.url : undefined,
+    // The design spec's own handleClick code silently dropped
+    // frameSearchIncomplete even though searchFramesForResult sets it --
+    // found and fixed during use-codex plan review. Without this line, the
+    // caller would never learn a search wasn't exhaustive.
+    ...(result.frameSearchIncomplete ? { frameSearchIncomplete: true } : {}),
   };
 }
 
 async function forwardToContentScript(msg) {
   // click/type always target one specific frame (default top frame) --
   // there's no meaningful "click in every frame at once".
-  if (msg.type === 'click' || msg.type === 'type' || msg.type === 'wait_for') {
+  // click is handled entirely by handleClick now (see the switch in
+  // handleNativeMessage) -- this function never receives msg.type ===
+  // 'click'. type gets the same frame-fallback search as click, but with
+  // no per-frame race (type has never had timeout protection -- if a
+  // frame's response hangs, the whole call hangs, same as before this
+  // batch; not fixed here, out of scope). wait_for keeps its original,
+  // single-frame-only behavior -- cross-frame waiting needs a materially
+  // different design (waiting on multiple frames simultaneously), not in
+  // scope for this batch.
+  if (msg.type === 'type') {
+    if (msg.frameId != null) {
+      const gate = await privilegedGate(msg, { frameId: msg.frameId });
+      if (!gate.ok) return gate;
+      return sendToFrame(msg.tabId, msg.frameId, msg);
+    }
+    return searchFramesForResult(msg, (frameId) => sendToFrame(msg.tabId, frameId, msg));
+  }
+  if (msg.type === 'wait_for') {
     const frameId = msg.frameId ?? 0;
     const gate = await privilegedGate(msg, { frameId });
     if (!gate.ok) return gate;
