@@ -88,6 +88,7 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] First call ever (no "Pending Deletion" folder exists yet) auto-creates it; a second call reuses the same folder rather than creating a duplicate
 - [ ] Moving a bookmark that has Tags/Keyword set (visible in Firefox's bookmark manager) — after the move, confirm in the bookmark manager that Tags/Keyword are still present (this is the spec's stated "inference, not a verified guarantee" — this check is what turns it into a verified fact)
 - [ ] Called with a nonexistent/already-deleted `id` — returns a structured error, not a hang or unhandled exception
+- [ ] Moving a bookmark that was sitting directly in Other Bookmarks (not in any sub-folder) reports `from: ""` (the established unprefixed-default-root convention used elsewhere in this tool set — see `list_bookmarks`), not `"Other Bookmarks"` or any other string — this is expected, not a bug
 
 ## Policy gate / blacklist
 - [ ] Pasting a full URL (e.g. `https://www.example.com/`) into the options page's hostname field gets normalized to a bare hostname (`www.example.com`) before being stored/listed — not silently stored as-is

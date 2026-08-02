@@ -234,7 +234,7 @@ export function registerTools(server, bridgeClient) {
     {
       description:
         'Move a bookmark or folder to a fixed "Pending Deletion" folder (created automatically under Other Bookmarks on first use) — this tool NEVER permanently deletes anything, it only relocates. Permanent deletion is always a manual step the user performs later in Firefox\'s own bookmark manager. Pass exactly one of `target.id` (a bookmark id, from add_bookmark/list_bookmarks/search_bookmarks results — NOT a folder id, folders aren\'t addressable by id) or `target.folder` (a folder path, same convention as add_bookmark\'s `folder` parameter, including the "Bookmarks Toolbar"/"Bookmarks Menu"/"Mobile Bookmarks" root-label prefixes). Moving a folder moves its entire contents with it. Returns the item\'s previous location as `from` and "Pending Deletion" as `to`.',
-      inputSchema: { target: z.object({ id: z.string().optional(), folder: z.string().optional() }) },
+      inputSchema: { target: z.object({ id: z.string().optional(), folder: z.string().optional() }).optional() },
     },
     async ({ target }) => {
       const result = await bridgeClient.call({ type: 'move_to_pending_deletion', target });

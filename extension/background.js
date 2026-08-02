@@ -609,7 +609,7 @@ async function handleSearchBookmarks(msg) {
 // in the bookmark tree.
 async function isNodeOrAncestor(candidateId, startId) {
   let currentId = startId;
-  while (currentId) {
+  while (currentId && !BOOKMARKS_ROOT_IDS.has(currentId)) {
     if (currentId === candidateId) return true;
     const [node] = await browser.bookmarks.get(currentId);
     currentId = node.parentId;
@@ -659,7 +659,7 @@ async function handleMoveToPendingDeletion(msg) {
   // Must be captured BEFORE move() below — move() mutates node.parentId.
   const originalParentId = node.parentId;
 
-  const { parentId: pendingDeletionId } = await walkFolderPath(['Pending Deletion'], { create: true });
+  const { parentId: pendingDeletionId, folder: pendingDeletionPath } = await walkFolderPath(['Pending Deletion'], { create: true });
 
   if (await isNodeOrAncestor(nodeId, pendingDeletionId)) {
     return { ok: false, error: 'cannot_move_ancestor_of_destination' };
@@ -673,7 +673,7 @@ async function handleMoveToPendingDeletion(msg) {
     type: node.type,
     title: node.title,
     from: await getFolderPathString(originalParentId),
-    to: 'Pending Deletion',
+    to: pendingDeletionPath,
   };
 }
 
