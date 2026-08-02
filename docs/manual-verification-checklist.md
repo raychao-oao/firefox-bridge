@@ -17,6 +17,15 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 
 ## MCP server + tools (run mcp-server manually: `cd repo/mcp-server && node src/index.js`, drive it with any MCP-capable client or a small manual JSON-RPC script over stdio)
 - [ ] `acquire_tab` with a `url` opens a new tab and returns a `tabId`
+- [ ] `acquire_tab({url: '<一個會正常載入的網址>'})` 開新分頁，確認回應的 `url` 就是傳入的目標網址（不是 `about:blank`），且沒有 `urlPending` 欄位
+- [ ] `acquire_tab({url: '<一個載入極快的本機測試頁面，例如 localhost 上的靜態 HTML>'})` 連續呼叫多次，確認沒有任何一次意外等滿 3000ms 才回應——這是驗證 use-codex review 抓到的「監聽器裝晚了、錯過快速 commit」問題的直接迴歸測試
+- [ ] `acquire_tab()`（不傳 `url`）開新分頁，確認回應立刻回來（沒有等待延遲），`url` 是 `about:blank`
+- [ ] `acquire_tab({url: 'about:blank'})`（明確傳入 `about:blank`，不是省略）開新分頁，確認行為跟不傳 `url` 一樣立刻回應，不觸發等待邏輯
+- [ ] `acquire_tab({url: '<一個會逾時/連不上的網址，例如指向一個關掉的本機 port>'})`，確認在約 3000ms 後回應，`ok: true`，`urlPending: true`
+- [ ] `acquire_tab({url: '<一個會被伺服器端 redirect 到另一個網址的網址>'})`，確認回應的 `url` 是 redirect 後的網址（可能跟傳入的 `msg.url` 不同），而不是誤報 `urlPending: true` 或回傳跟請求不一致的值——驗證「commit 不保證等於 msg.url」這個文件化的限制
+- [ ] `acquire_tab({tabId: <一個已存在、目前正在導覽中的分頁 id>})`，確認立刻回應（不等待），行為跟修改前一致——這是確認範圍限定正確、沒有意外影響到 tabId 路徑的迴歸測試
+- [ ] `acquire_tab({url, cookieStoreId})`（container 變體）開新分頁，確認同樣會等到導覽 commit，行為跟不帶 `cookieStoreId` 的路徑一致
+- [ ] `acquire_tab({url: '<一個 Firefox 會直接拒絕的 data:/javascript: 網址，如果能構造出這種案例>'})`，確認 `browser.tabs.create` 的例外正常往外拋、變成通用的 `{ok: false, error: ...}` 回應，而不是讓監聽器/計時器卡住或讓整個呼叫掛住
 - [ ] `list_tabs` returns all open tabs (id, url, title) including lease status, matching actual browser state (open a couple of tabs manually, acquire a lease on one via another tool call, and confirm list_tabs reflects both the full tab list and the correct leasedBy status)
 - [ ] `navigate` to a normal (non-blacklisted) URL succeeds
 - [ ] `click` on a known selector (test against a simple local HTML page) actually clicks
