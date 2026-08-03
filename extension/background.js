@@ -1117,11 +1117,43 @@ async function handleClick(msg) {
   const tabBefore = await browser.tabs.get(msg.tabId);
   const urlBefore = tabBefore.url;
 
-  // Longer than content-script's own 300ms observation window (not equal to
-  // it) -- gives room for messaging round-trip/serialization overhead so an
-  // ordinary, non-blocked click doesn't get misread as dialogOpened just
-  // because the response arrived a few ms late.
-  const CLICK_TIMEOUT_MS = 600;
+  // Firefox clamps setTimeout/setInterval in a BACKGROUND (non-visible) tab
+  // to a roughly 1000ms minimum interval -- confirmed live via DOM-based
+  // instrumentation: content-script's own nominal 300ms MutationObserver
+  // settle timer was observed firing at 402ms on an active, focused tab but
+  // 1007ms on a backgrounded one. A tool whose whole purpose is operating
+  // tabs the user isn't actively looking at makes "backgrounded tab" the
+  // COMMON case, not a rare edge case -- CLICK_TIMEOUT_MS_ACTIVE (600ms,
+  // gives room for messaging round-trip/serialization overhead beyond the
+  // content-script's 300ms window) is fine for a foregrounded tab, but was
+  // producing false dialogOpened positives on nearly every click to a
+  // backgrounded tab in real-world use (verified: the underlying click had
+  // genuinely succeeded every time -- read_page confirmed the DOM change --
+  // the reported failure was purely an artifact of the race losing to
+  // Firefox's own timer throttling, not anything about the page).
+  //
+  // tabBefore.active alone is NOT sufficient here -- it means "the selected
+  // tab within its own window," not "the user is actually looking at this
+  // browser." A tab that's active in its window but sitting in an
+  // unfocused Firefox window (the OS focus is on some other app -- the
+  // normal case while an automation agent works) is exactly as throttled
+  // as a background tab in a focused window, because Firefox's timer
+  // throttling tracks page visibility, which follows OS-level window focus
+  // too. Found by use-codex review. browser.windows.get is one extra call,
+  // but it's the only way to get the real signal.
+  let windowFocused = true;
+  try {
+    const win = await browser.windows.get(tabBefore.windowId);
+    windowFocused = win.focused;
+  } catch (err) {
+    // Unknown window -- fall back to the safer (longer) budget rather than
+    // assuming focused.
+    windowFocused = false;
+  }
+  const isVisible = tabBefore.active && windowFocused;
+  const CLICK_TIMEOUT_MS_ACTIVE = 600;
+  const CLICK_TIMEOUT_MS_BACKGROUND = 3000;
+  const CLICK_TIMEOUT_MS = isVisible ? CLICK_TIMEOUT_MS_ACTIVE : CLICK_TIMEOUT_MS_BACKGROUND;
 
   // Known limitation of sendToFrame's retry-and-reinject logic: if a click
   // triggers a navigation and the original browser.tabs.sendMessage inside
