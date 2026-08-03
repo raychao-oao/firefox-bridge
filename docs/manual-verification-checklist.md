@@ -236,3 +236,10 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] `upload_file` with a file over 700KB -- confirm `file_too_large`
 - [ ] `upload_file` targeting a selector that matches something other than a file input -- confirm `not_a_file_input`
 - [ ] `upload_file` with a nonexistent `filePath` -- confirm `file_read_failed`, not a hang or unhandled exception
+
+### Windows support
+
+- [ ] From a WSL shell, run the Codex `mcp add` command from the README's Windows section, then confirm `codex mcp list` shows `firefox-bridge` connected and a `list_tabs` call succeeds
+- [ ] Edit `%APPDATA%\Claude\claude_desktop_config.json` per the README, restart Claude Desktop, and confirm `firefox-bridge` shows as connected with a working `list_tabs` call
+- [ ] Set the `[desktop]` and `[mcp_servers.firefox-bridge]` entries in `%USERPROFILE%\.codex\config.toml` per the README, restart Codex Desktop App, and confirm a `list_tabs` call succeeds
+- [ ] On macOS or Linux, run `npm test` at the repo root after pulling this change and confirm it is still 100% green (regression guard — the Windows branches must not affect non-Windows behavior)

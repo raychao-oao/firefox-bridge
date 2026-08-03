@@ -88,6 +88,9 @@ node scripts/install-native-manifest.js
 Registers the native messaging manifest so Firefox can spawn the native host. Restart
 Firefox after this and after installing the extension.
 
+On Windows, the installer creates a `.cmd` launcher and registers the manifest under
+`HKCU\Software\Mozilla\NativeMessagingHosts`, so administrator rights are not required.
+
 ### 3. MCP server
 
 Register with Claude Code (or any MCP-capable CLI):
@@ -97,6 +100,105 @@ claude mcp add firefox-bridge -s user -- node mcp-server/src/index.js
 `-s user` makes it available in every session, not just one project. Verify with
 `claude mcp list` — should show `firefox-bridge: ... - ✔ Connected` once the extension is
 loaded and the native host is running.
+
+### Windows
+
+firefox-bridge supports Windows natively: Firefox and the native messaging host run on
+Windows, and any of the three client types below can connect to the MCP server.
+
+**Prerequisite for all three:** keep the repo in a Windows-visible path (e.g.
+`C:\Users\<WindowsUser>\Documents\Codex\firefox-bridge`), then from Windows
+PowerShell/cmd:
+
+```powershell
+cd C:\Users\<WindowsUser>\Documents\Codex\firefox-bridge
+npm ci
+node scripts/install-native-manifest.js
+```
+
+This creates the `.cmd` launcher and the `HKCU` native-messaging registration described
+above. Restart Firefox and load the extension.
+
+#### WSL CLI clients
+
+From inside WSL, per CLI:
+
+**Codex:**
+```bash
+codex mcp add firefox-bridge -- \
+  "/mnt/c/Program Files/nodejs/node.exe" \
+  'C:\Users\<WindowsUser>\Documents\Codex\firefox-bridge\mcp-server\src\index.js'
+```
+
+**Claude Code:**
+```bash
+claude mcp add firefox-bridge -s user -- \
+  "/mnt/c/Program Files/nodejs/node.exe" \
+  "C:\Users\<WindowsUser>\Documents\Codex\firefox-bridge\mcp-server\src\index.js"
+```
+
+**agy (Antigravity CLI):** no `mcp add` subcommand exists — edit
+`~/.gemini/config/mcp_config.json` directly:
+```json
+{
+  "mcpServers": {
+    "firefox-bridge": {
+      "command": "/mnt/c/Program Files/nodejs/node.exe",
+      "args": ["C:\\Users\\<WindowsUser>\\Documents\\Codex\\firefox-bridge\\mcp-server\\src\\index.js"]
+    }
+  }
+}
+```
+
+All three point at the same Windows `node.exe` and the same Windows path to
+`mcp-server/src/index.js` — the MCP server and the Windows native host must share the
+same Windows runtime directory so both sides derive the same named-pipe path and read the
+same token file.
+
+#### Claude Desktop (Windows native app)
+
+Edit `%APPDATA%\Claude\claude_desktop_config.json` directly:
+
+```json
+{
+  "mcpServers": {
+    "firefox-bridge": {
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": ["C:\\Users\\<WindowsUser>\\Documents\\Codex\\firefox-bridge\\mcp-server\\src\\index.js"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop. (MSIX/Microsoft-Store installs of Claude Desktop put this file at
+a different `Packages\Claude_*\LocalCache\Roaming\Claude\` path instead.)
+
+#### Codex Desktop App (Windows native app)
+
+Shares `%USERPROFILE%\.codex\config.toml` with Codex CLI. Confirm the `[desktop]` section
+contains:
+
+```toml
+[desktop]
+runCodexInWindowsSubsystemForLinux = false
+integratedTerminalShell = "powershell"
+```
+
+Keep any other existing keys in `[desktop]` — only add/edit these two.
+`runCodexInWindowsSubsystemForLinux = false` is required so Codex Desktop runs natively on
+Windows (not inside WSL) and can reach the Windows-native host over the same named pipe.
+
+Then add or update the MCP server entry in the same file:
+
+```toml
+[mcp_servers.firefox-bridge]
+command = 'C:\Program Files\nodejs\node.exe'
+args = ['C:\Users\<WindowsUser>\Documents\Codex\firefox-bridge\mcp-server\src\index.js']
+```
+
+Only one `[mcp_servers.firefox-bridge]` section may exist — replace `command`/`args` in
+place if it's already there. After saving: fully quit Codex Desktop App, confirm Firefox
+is running with the extension enabled, relaunch, and verify with a `list_tabs` call.
 
 ## Development
 
