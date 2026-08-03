@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { bridgeSocketPath } from '@firefox-bridge/native-host/src/bridge-dir.js';
 // Framing is imported from the native-host workspace package rather than
 // re-implemented here, so the two ends of the socket can never drift apart
 // (and so this side inherits the length-prefix bound).
@@ -33,7 +34,7 @@ export class BridgeClient extends EventEmitter {
     super();
     this.socketDir = socketDir;
     this.requestTimeoutMs = requestTimeoutMs;
-    this.socketPath = path.join(socketDir, 'bridge.sock');
+    this.socketPath = bridgeSocketPath(socketDir);
     this.tokenPath = path.join(socketDir, 'token');
     this.socket = null;
     this.pending = new Map(); // requestId -> {resolve, reject, timer}

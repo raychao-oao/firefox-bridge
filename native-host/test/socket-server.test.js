@@ -32,6 +32,7 @@ function connectAndAuth(socketPath, token) {
 }
 
 test('start() creates a socket dir with 0700 perms and a token file with 0600 perms', async () => {
+  if (process.platform === 'win32') return;
   await withServer(async ({ dir }) => {
     const dirStat = await stat(dir);
     assert.equal(dirStat.mode & 0o777, 0o700);

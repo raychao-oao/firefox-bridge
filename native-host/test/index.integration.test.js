@@ -8,8 +8,10 @@ import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { encodeMessage, createDecoder, MAX_SOCKET_MESSAGE_BYTES } from '../src/native-messaging.js';
+import { bridgeSocketPath } from '../src/bridge-dir.js';
 
 const HOST_ENTRY = fileURLToPath(new URL('../src/index.js', import.meta.url));
 const SOCKET_OPTS = { maxBytes: MAX_SOCKET_MESSAGE_BYTES };
@@ -17,7 +19,7 @@ const SOCKET_OPTS = { maxBytes: MAX_SOCKET_MESSAGE_BYTES };
 function connectClient(socketDir) {
   return new Promise((resolve, reject) => {
     readFile(path.join(socketDir, 'token'), 'utf8').then((token) => {
-      const socket = net.createConnection(path.join(socketDir, 'bridge.sock'));
+      const socket = net.createConnection(bridgeSocketPath(socketDir));
       const pending = new Map();
       let sessionId = null;
       const decoder = createDecoder((msg) => {
@@ -76,7 +78,11 @@ async function withHost(onRequest, fn) {
     await fn({ client, socketDir, host, connect: () => connectClient(socketDir) });
   } finally {
     client.close();
-    host.kill('SIGTERM');
+    if (host.exitCode === null && host.signalCode === null) {
+      const exited = once(host, 'exit');
+      host.kill('SIGTERM');
+      await exited;
+    }
     await rm(runtime, { recursive: true, force: true });
   }
 }

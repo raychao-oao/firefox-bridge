@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { BridgeClient } from '../src/bridge-client.js';
+import { bridgeSocketPath } from '@firefox-bridge/native-host/src/bridge-dir.js';
 
 // Encoding must match native-host's framing scheme (4-byte LE length + JSON).
 function encode(obj) {
@@ -42,7 +43,7 @@ function makeFakeServer(socketPath, token, { onRequest, onConnection, rejectAuth
 
 async function withFakeServer(fn, { rejectAuth = false, respondToRequests = true } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'fb-bridge-client-test-'));
-  const socketPath = path.join(dir, 'bridge.sock');
+  const socketPath = bridgeSocketPath(dir);
   const token = 'test-token-123';
   await writeFile(path.join(dir, 'token'), token, { mode: 0o600 });
   const requests = [];

@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import { bridgeSocketPath } from './bridge-dir.js';
 import { encodeMessage, createDecoder, MAX_SOCKET_MESSAGE_BYTES } from './native-messaging.js';
 
 const SOCKET_FRAME_OPTS = { maxBytes: MAX_SOCKET_MESSAGE_BYTES };
@@ -13,7 +14,7 @@ export class SocketServer extends EventEmitter {
     this.socketDir = socketDir;
     this.sessionManager = sessionManager;
     this.server = null;
-    this.socketPath = path.join(socketDir, 'bridge.sock');
+    this.socketPath = bridgeSocketPath(socketDir);
     this.tokenPath = path.join(socketDir, 'token');
     this.token = null;
   }
@@ -22,7 +23,9 @@ export class SocketServer extends EventEmitter {
     await mkdir(this.socketDir, { recursive: true, mode: 0o700 });
     this.token = randomBytes(32).toString('hex');
     await writeFile(this.tokenPath, this.token, { mode: 0o600 });
-    await unlink(this.socketPath).catch(() => {}); // clear stale socket file
+    if (process.platform !== 'win32') {
+      await unlink(this.socketPath).catch(() => {}); // clear stale socket file
+    }
 
     this.server = net.createServer((socket) => this._handleConnection(socket));
     await new Promise((resolve, reject) => {
@@ -92,6 +95,6 @@ export class SocketServer extends EventEmitter {
     if (this.server) {
       await new Promise((resolve) => this.server.close(resolve));
     }
-    await unlink(this.socketPath).catch(() => {});
+    if (process.platform !== 'win32') await unlink(this.socketPath).catch(() => {});
   }
 }

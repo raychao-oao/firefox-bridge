@@ -23,21 +23,46 @@ import { SocketServer } from './socket-server.js';
 const REQUEST_TIMEOUT_MS = 90_000;
 
 async function acquireSingletonLock(dir) {
-  const { open } = await import('node:fs/promises');
+  const { open, readFile, unlink } = await import('node:fs/promises');
   const lockPath = path.join(dir, 'native-host.lock');
-  try {
-    const handle = await open(lockPath, 'wx'); // fails if the file already exists
-    await handle.writeFile(String(process.pid));
-    return { lockPath, handle };
-  } catch (err) {
-    if (err.code === 'EEXIST') {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const handle = await open(lockPath, 'wx'); // fails if the file already exists
+      await handle.writeFile(String(process.pid));
+      return { lockPath, handle };
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+
+      let ownerIsAlive = false;
+      try {
+        const ownerPid = Number((await readFile(lockPath, 'utf8')).trim());
+        if (Number.isSafeInteger(ownerPid) && ownerPid > 0) {
+          try {
+            process.kill(ownerPid, 0);
+            ownerIsAlive = true;
+          } catch (probeErr) {
+            // EPERM means the process exists but cannot be signalled. ESRCH
+            // means the PID is gone; any other result is treated conservatively.
+            ownerIsAlive = probeErr.code !== 'ESRCH';
+          }
+        }
+      } catch (readErr) {
+        if (readErr.code === 'ENOENT') continue; // another process cleared it
+      }
+
+      if (!ownerIsAlive && attempt === 0) {
+        await unlink(lockPath).catch((unlinkErr) => {
+          if (unlinkErr.code !== 'ENOENT') throw unlinkErr;
+        });
+        continue;
+      }
+
       throw new Error(
-        `Another native-host instance appears to be running (lock file: ${lockPath}). ` +
-        `If this is stale, remove it manually and retry.`
+        `Another native-host instance appears to be running (lock file: ${lockPath}).`
       );
     }
-    throw err;
   }
+  throw new Error(`Could not acquire native-host lock: ${lockPath}`);
 }
 
 async function main() {
