@@ -20,7 +20,7 @@ you're already using, logged into whatever you're logged into.
 
 ```
 [MCP Server] ←(stdio)→ [CLI]
-      ↕ Unix domain socket (token-authenticated)
+      ↕ Unix domain socket / Windows named pipe (token-authenticated)
 [Native Host] ←(Native Messaging, stdio)→ [Firefox Extension] → your real tabs
 ```
 
