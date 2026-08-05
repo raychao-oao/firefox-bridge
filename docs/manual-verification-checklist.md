@@ -243,3 +243,23 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] Edit `%APPDATA%\Claude\claude_desktop_config.json` per the README, restart Claude Desktop, and confirm `firefox-bridge` shows as connected with a working `list_tabs` call
 - [ ] Set the `[desktop]` and `[mcp_servers.firefox-bridge]` entries in `%USERPROFILE%\.codex\config.toml` per the README, restart Codex Desktop App, and confirm a `list_tabs` call succeeds
 - [ ] On macOS or Linux, run `npm test` at the repo root after pulling this change and confirm it is still 100% green (regression guard — the Windows branches must not affect non-Windows behavior)
+
+### Tab lifecycle (close_tab, go_back, go_forward)
+
+- [ ] `close_tab` without a lease on the target `tabId` — confirm `not_leased`
+- [ ] `close_tab` on a tab leased by a *different* session — confirm `conflict`
+- [ ] `close_tab` on a tab this session has leased — confirm the tab actually closes
+      and the tool returns `ok: true`
+- [ ] `close_tab` on the last remaining tab in a window — confirm the whole window
+      closes (expected, not a bug)
+- [ ] Start `start_console`/`start_network` capture on a leased tab, then `close_tab`
+      it; `acquire_tab` a fresh tab afterward and confirm no stale capture data from
+      the closed tab leaks into `get_console`/`get_network` on the new tab
+- [ ] `go_back`/`go_forward` without a lease on the target `tabId` — confirm
+      `not_leased`
+- [ ] Navigate a leased tab A → B (e.g. via `navigate`), then `go_back` — confirm the
+      tab returns to A; then `go_forward` — confirm it returns to B
+- [ ] `go_back` on a tab with no earlier history, and `go_forward` on a tab with no
+      later history — record the ACTUAL observed behavior (silent no-op vs. an error)
+      since this is not documented by Firefox; update this checklist item with the
+      finding once observed

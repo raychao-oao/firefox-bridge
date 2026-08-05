@@ -263,6 +263,12 @@ async function handleNativeMessage(msg) {
         return respond(await handleAcquireTab(msg));
       case 'release_tab':
         return respond(handleReleaseTab(msg));
+      case 'close_tab':
+        return respond(await handleCloseTab(msg));
+      case 'go_back':
+        return respond(await handleGoBack(msg));
+      case 'go_forward':
+        return respond(await handleGoForward(msg));
       case 'navigate':
         return respond(await handleNavigate(msg));
       case 'list_tabs':
@@ -499,6 +505,37 @@ function handleReleaseTab(msg) {
   if (!lease.ok) return { ok: false, error: lease.error };
   releaseTabState(msg.tabId);
   return { ok: true };
+}
+
+function handleCloseTab(msg) {
+  const lease = checkLease(msg.sessionId, msg.tabId);
+  if (!lease.ok) return { ok: false, error: lease.error };
+  return browser.tabs
+    .remove(msg.tabId)
+    .then(() => ({ ok: true }))
+    .catch((err) => ({ ok: false, error: `unknown_tab: ${err.message}` }));
+}
+
+async function handleGoBack(msg) {
+  const lease = checkLease(msg.sessionId, msg.tabId);
+  if (!lease.ok) return { ok: false, error: lease.error };
+  try {
+    await browser.tabs.goBack(msg.tabId);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: `unknown_tab: ${err.message}` };
+  }
+}
+
+async function handleGoForward(msg) {
+  const lease = checkLease(msg.sessionId, msg.tabId);
+  if (!lease.ok) return { ok: false, error: lease.error };
+  try {
+    await browser.tabs.goForward(msg.tabId);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: `unknown_tab: ${err.message}` };
+  }
 }
 
 async function handleNavigate(msg) {

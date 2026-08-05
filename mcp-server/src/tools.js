@@ -301,6 +301,43 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'close_tab',
+    {
+      description:
+        'Close a tab this session currently has leased. Closing the last remaining tab in a window closes the window. The lease and any active console/network capture on this tab are cleared automatically.',
+      inputSchema: { tabId: z.number() },
+    },
+    async ({ tabId }) => {
+      const result = await bridgeClient.call({ type: 'close_tab', tabId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'go_back',
+    {
+      description: 'Navigate a leased tab back one entry in its browsing history, like the browser back button.',
+      inputSchema: { tabId: z.number() },
+    },
+    async ({ tabId }) => {
+      const result = await bridgeClient.call({ type: 'go_back', tabId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'go_forward',
+    {
+      description: 'Navigate a leased tab forward one entry in its browsing history, like the browser forward button.',
+      inputSchema: { tabId: z.number() },
+    },
+    async ({ tabId }) => {
+      const result = await bridgeClient.call({ type: 'go_forward', tabId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'list_tabs',
     {
       description:
