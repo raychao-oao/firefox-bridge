@@ -263,3 +263,13 @@ that automated unit tests can't cover (real Firefox + real process spawning).
       later history — record the ACTUAL observed behavior (silent no-op vs. an error)
       since this is not documented by Firefox; update this checklist item with the
       finding once observed
+- [ ] `go_back`/`go_forward` onto a blacklisted URL triggers the confirmation popup
+      and returns `blacklisted_denied` on deny, with the tab correctly navigated back
+      to its original URL
+- [ ] Confirm via the popup's "allow once"/"allow for session" option that a
+      subsequent `go_back`/`go_forward` to that same URL is then allowed
+- [ ] While `start_network` capture is active, deny a `go_back`/`go_forward` onto a
+      blacklisted URL and check `get_network` — note whether any request from the
+      denied page briefly appears despite the denial (expected, a pre-existing
+      limitation of the capture buffer not being cleared on navigation, not a
+      regression to fix here)

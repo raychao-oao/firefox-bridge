@@ -516,15 +516,38 @@ function handleCloseTab(msg) {
     .catch((err) => ({ ok: false, error: `unknown_tab: ${err.message}` }));
 }
 
+// go_back/go_forward don't know the destination URL until after the browser
+// navigates there (unlike handleNavigate, which gates on msg.url up front).
+// So we let the navigation happen, then policy-check the tab's new URL and
+// undo (navigate back the other way) if it turns out to be blacklisted.
+async function gatePostHistoryNavigation(msg, undo) {
+  let tab;
+  try {
+    tab = await browser.tabs.get(msg.tabId);
+  } catch (err) {
+    return { ok: false, error: `unknown_tab: ${err.message}` };
+  }
+  const policy = await policyCheck(tab.url, msg.sessionId);
+  if (!policy.allowed) {
+    try {
+      await undo();
+    } catch {
+      // best-effort undo -- even if it fails, still report the denial below
+    }
+    return { ok: false, error: policy.error };
+  }
+  return { ok: true };
+}
+
 async function handleGoBack(msg) {
   const lease = checkLease(msg.sessionId, msg.tabId);
   if (!lease.ok) return { ok: false, error: lease.error };
   try {
     await browser.tabs.goBack(msg.tabId);
-    return { ok: true };
   } catch (err) {
     return { ok: false, error: `unknown_tab: ${err.message}` };
   }
+  return gatePostHistoryNavigation(msg, () => browser.tabs.goForward(msg.tabId));
 }
 
 async function handleGoForward(msg) {
@@ -532,10 +555,10 @@ async function handleGoForward(msg) {
   if (!lease.ok) return { ok: false, error: lease.error };
   try {
     await browser.tabs.goForward(msg.tabId);
-    return { ok: true };
   } catch (err) {
     return { ok: false, error: `unknown_tab: ${err.message}` };
   }
+  return gatePostHistoryNavigation(msg, () => browser.tabs.goBack(msg.tabId));
 }
 
 async function handleNavigate(msg) {

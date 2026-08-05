@@ -316,7 +316,8 @@ export function registerTools(server, bridgeClient) {
   server.registerTool(
     'go_back',
     {
-      description: 'Navigate a leased tab back one entry in its browsing history, like the browser back button.',
+      description:
+        'Navigate a leased tab back one entry in its browsing history, like the browser back button. If the resulting URL hits the blacklist, the tab is landed on it briefly then reverted, the same confirmation flow as `navigate` is triggered, and `blacklisted_denied` is returned on decline.',
       inputSchema: { tabId: z.number() },
     },
     async ({ tabId }) => {
@@ -328,7 +329,8 @@ export function registerTools(server, bridgeClient) {
   server.registerTool(
     'go_forward',
     {
-      description: 'Navigate a leased tab forward one entry in its browsing history, like the browser forward button.',
+      description:
+        'Navigate a leased tab forward one entry in its browsing history, like the browser forward button. If the resulting URL hits the blacklist, the tab is landed on it briefly then reverted, the same confirmation flow as `navigate` is triggered, and `blacklisted_denied` is returned on decline.',
       inputSchema: { tabId: z.number() },
     },
     async ({ tabId }) => {
