@@ -241,7 +241,8 @@ manual checklist to run through after changes there.
   window is created. The same toggle also gates visibility, not just action: without it,
   `list_tabs` can't see private tabs at all — they're omitted from the list entirely, not
   merely present-but-unreachable — so an absence of `incognito: true` entries doesn't mean
-  no private tabs are open
+  no private tabs are open, and `acquire_tab`'s `windowId` can't target a private window
+  either, reporting `window_not_found` rather than a private-specific error
 - Console/network capture is top-frame only, not frame-aware
 - Text truncation is char-count-based, not byte-based (risk on CJK-heavy pages)
 - WebMCP integration deferred to a future version

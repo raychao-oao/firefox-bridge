@@ -461,6 +461,15 @@ async function handleAcquireTab(msg) {
       } catch (err) {
         return { ok: false, error: `window_not_found: ${err.message}` };
       }
+      // browser.windows.get() succeeds for any existing window, including
+      // non-normal ones like this extension's own blacklist-confirmation
+      // popup (browser.windows.create({ type: 'popup', ... }) elsewhere in
+      // this file). Reject those the same way as a nonexistent window,
+      // rather than letting them fall through to a generic tabs.create
+      // failure later.
+      if (targetWindow.type !== 'normal') {
+        return { ok: false, error: 'window_not_found: window is not a normal browsing window' };
+      }
       // Firefox's Multi-Account Containers don't exist in private windows --
       // reject this combination with a purpose-built error before ever
       // calling browser.tabs.create, rather than letting Firefox's own
