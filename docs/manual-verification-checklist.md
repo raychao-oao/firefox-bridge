@@ -274,6 +274,26 @@ that automated unit tests can't cover (real Firefox + real process spawning).
       limitation of the capture buffer not being cleared on navigation, not a
       regression to fix here)
 
+### Tab discard (discard_tab, list_tabs fields)
+
+- [ ] Discard a background (non-active) tab this session has not acquired —
+      `results[0].ok: true`; follow up with `list_tabs` and confirm that tab's
+      `discarded: true` (don't rely on Firefox's UI appearance as the check).
+- [ ] Discard a tab currently leased by a *different* session — confirm `conflict`
+- [ ] Discard a tab currently leased by *this* session — succeeds, lease is
+      untouched afterward (`list_tabs` still shows `leasedBy` for this session)
+- [ ] Attempt to discard the active tab in its window — confirm
+      `cannot_discard_active_tab`
+- [ ] Discard an already-discarded tab (call it twice, or discard a tab Firefox
+      itself already auto-discarded) — confirm the second call also reports
+      `ok: true`, not an error
+- [ ] Discard a batch of 3 `tabIds` where one is active, one is leased by another
+      session, one is a normal idle tab — verify all three outcomes are
+      individually correct in `results`
+- [ ] Call `list_tabs` and confirm `discarded` and `lastAccessed` are present and
+      correct (discarded tab from above shows `discarded: true`; a
+      freshly-focused tab shows a recent `lastAccessed`)
+
 ### Reader View (read_article)
 
 - [ ] `read_article` on a real news/blog article page returns a sensible `title` and

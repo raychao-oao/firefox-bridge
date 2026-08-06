@@ -343,6 +343,19 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'discard_tab',
+    {
+      description:
+        'Unload one or more background tabs from memory (browser.tabs.discard) to free resources. The tab and its history are preserved; Firefox reloads it automatically next time it is focused. Does not require acquire_tab first -- succeeds on any tab not currently leased by a different session, and is idempotent (already-discarded tab reports ok: true, no error). Firefox refuses to discard the window\'s active tab (cannot_discard_active_tab). cannot_discard_tab means the tab was still loaded when checked afterward and was not active -- most likely a page blocking unload (e.g. a beforeunload prompt), though a rare race can also produce this for a discard that briefly succeeded before the tab was reactivated. Returns a per-tabId result so partial batches (some succeed, some fail) are fully reported -- the top-level ok is always true if the call reached the extension; check results[].ok per tab.',
+      inputSchema: { tabIds: z.array(z.number().int()).min(1) },
+    },
+    async ({ tabIds }) => {
+      const result = await bridgeClient.call({ type: 'discard_tab', tabIds });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'go_back',
     {
       description:
@@ -372,7 +385,7 @@ export function registerTools(server, bridgeClient) {
     'list_tabs',
     {
       description:
-        'List all open Firefox tabs (id, url, title, cookieStoreId) and which are currently leased. `cookieStoreId` identifies which Multi-Account Container (if any) the tab belongs to — see `list_containers`.',
+        'List all open Firefox tabs (id, url, title, cookieStoreId, discarded, lastAccessed) and which are currently leased. `cookieStoreId` identifies which Multi-Account Container (if any) the tab belongs to -- see `list_containers`. `discarded` is true if Firefox has already unloaded the tab from memory. `lastAccessed` is a millisecond epoch timestamp of when the tab was last focused -- use it to find idle tabs to discard.',
       inputSchema: {},
     },
     async () => {

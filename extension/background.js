@@ -265,6 +265,8 @@ async function handleNativeMessage(msg) {
         return respond(handleReleaseTab(msg));
       case 'close_tab':
         return respond(await handleCloseTab(msg));
+      case 'discard_tab':
+        return respond(await handleDiscardTab(msg));
       case 'go_back':
         return respond(await handleGoBack(msg));
       case 'go_forward':
@@ -518,6 +520,69 @@ function handleCloseTab(msg) {
     .catch((err) => ({ ok: false, error: `unknown_tab: ${err.message}` }));
 }
 
+// discard_tab intentionally does NOT reuse checkLease -- the primary use
+// case is freeing tabs nobody has acquired (that's exactly why they're
+// idle). It only blocks when a DIFFERENT session holds the lease.
+//
+// browser.tabs.discard() resolves successfully as a no-op when called on
+// the window's active tab -- it does NOT throw -- so this checks
+// tab.active proactively via tabs.get() before calling discard(), and
+// re-checks tab.discarded afterward as a postcondition. That postcondition
+// check has its own rare race (the tab could be reactivated between a
+// genuinely successful discard and this check, producing a false
+// cannot_discard_active_tab/cannot_discard_tab for a discard that briefly
+// worked) -- accepted per the design spec's "Accepted race" section
+// rather than adding tabs.onUpdated-based confirmation.
+async function discardOneTab(sessionId, tabId) {
+  const owner = leaseOwner.get(tabId);
+  if (owner && owner !== sessionId) return { tabId, ok: false, error: 'conflict' };
+
+  let tab;
+  try {
+    tab = await browser.tabs.get(tabId);
+  } catch (err) {
+    return { tabId, ok: false, error: `unknown_tab: ${err.message}` };
+  }
+  if (tab.discarded) return { tabId, ok: true }; // already discarded -- idempotent
+  if (tab.active) return { tabId, ok: false, error: 'cannot_discard_active_tab' };
+
+  try {
+    await browser.tabs.discard(tabId);
+  } catch (err) {
+    return { tabId, ok: false, error: `discard_failed: ${err.message}` };
+  }
+
+  // discard() resolving successfully does not prove the tab was actually
+  // discarded (active-tab no-op, beforeunload-blocked page, or the tab
+  // becoming active in the gap between the check above and this call) --
+  // verify the postcondition instead of trusting the resolved promise.
+  let after;
+  try {
+    after = await browser.tabs.get(tabId);
+  } catch (err) {
+    // discard() itself resolved, so the tab existed a moment ago -- most
+    // likely it closed in the interim, but tabs.get() can reject for
+    // other reasons too; preserve the real message rather than asserting
+    // a specific cause.
+    return { tabId, ok: false, error: `unknown_tab: ${err.message}` };
+  }
+  if (!after.discarded) {
+    return {
+      tabId,
+      ok: false,
+      error: after.active ? 'cannot_discard_active_tab' : 'cannot_discard_tab',
+    };
+  }
+  return { tabId, ok: true };
+}
+
+async function handleDiscardTab(msg) {
+  const results = await Promise.all(
+    msg.tabIds.map((tabId) => discardOneTab(msg.sessionId, tabId))
+  );
+  return { ok: true, results };
+}
+
 // go_back/go_forward don't know the destination URL until after the browser
 // navigates there (unlike handleNavigate, which gates on msg.url up front).
 // So we let the navigation happen, then policy-check the tab's new URL and
@@ -612,6 +677,8 @@ async function handleListTabs() {
       title: t.title,
       leasedBy: leaseOwner.get(t.id) || null,
       cookieStoreId: t.cookieStoreId,
+      discarded: t.discarded,
+      lastAccessed: t.lastAccessed,
     })),
   };
 }
