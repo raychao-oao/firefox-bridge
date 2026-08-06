@@ -44,7 +44,7 @@ you're already using, logged into whatever you're logged into.
 
 `navigate`, `click`, `type`, `read_page`, `read_article`, `list_elements`, `list_frames`, `screenshot`,
 `scroll_to`, `press_key`, `hover`, `drag_and_drop`, `upload_file`, `start_console`/`get_console`, `start_network`/`get_network`,
-`acquire_tab`/`release_tab`, `close_tab`, `discard_tab`, `go_back`, `go_forward`, `list_tabs`,
+`acquire_tab`/`release_tab`, `open_private_window`, `close_tab`, `discard_tab`, `go_back`, `go_forward`, `list_tabs`,
 `search_history`, `add_bookmark`, `list_bookmarks`, `search_bookmarks`, `to_be_deleted`,
 `list_containers`, `create_container`, `wait_for`.
 
@@ -235,6 +235,10 @@ manual checklist to run through after changes there.
 - `discard_tab` isn't policy-gated and doesn't require a lease — any session can unload any
   tab in any window, including tabs no session has acquired (deliberate; that's the primary
   use case)
+- `open_private_window` requires the user to manually enable "Run in Private Windows" for
+  this extension in `about:addons` first — Firefox gives extensions no API to do this
+  themselves. Without it, the call fails outright with `private_window_access_denied`; no
+  window is created
 - Console/network capture is top-frame only, not frame-aware
 - Text truncation is char-count-based, not byte-based (risk on CJK-heavy pages)
 - WebMCP integration deferred to a future version

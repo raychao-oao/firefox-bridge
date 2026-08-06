@@ -318,6 +318,19 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'open_private_window',
+    {
+      description:
+        'Open a new Firefox private browsing window and lease its initial tab to this session (like acquire_tab -- no separate acquire_tab call needed). Pass url to navigate there immediately; omitted or "about:blank" opens a blank private tab. Requires the extension\'s "Run in Private Windows" toggle to be enabled by the user in about:addons -- Firefox gives extensions no API to enable this themselves, and without it this call fails outright with private_window_access_denied (no window is created). Subject to the same URL blacklist confirmation flow as acquire_tab/navigate (blacklisted_denied on decline).',
+      inputSchema: { url: z.string().optional() },
+    },
+    async ({ url }) => {
+      const result = await bridgeClient.call({ type: 'open_private_window', url });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'release_tab',
     {
       description: 'Release the lease on a tab this session previously acquired.',
@@ -385,7 +398,7 @@ export function registerTools(server, bridgeClient) {
     'list_tabs',
     {
       description:
-        'List all open Firefox tabs (id, url, title, cookieStoreId, discarded, lastAccessed) and which are currently leased. `cookieStoreId` identifies which Multi-Account Container (if any) the tab belongs to -- see `list_containers`. `discarded` is true if Firefox has already unloaded the tab from memory. `lastAccessed` is a millisecond epoch timestamp of when the tab was last focused -- use it to find idle tabs to discard.',
+        'List all open Firefox tabs (id, url, title, cookieStoreId, discarded, lastAccessed, incognito) and which are currently leased. `cookieStoreId` identifies which Multi-Account Container (if any) the tab belongs to -- see `list_containers`. `discarded` is true if Firefox has already unloaded the tab from memory. `lastAccessed` is a millisecond epoch timestamp of when the tab was last focused. `incognito` is true if the tab belongs to a private browsing window -- other tools can only reach it if the user has enabled "Run in Private Windows" for this extension in about:addons.',
       inputSchema: {},
     },
     async () => {

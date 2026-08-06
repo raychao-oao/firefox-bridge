@@ -297,6 +297,39 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] Call `start_console` on a tab, discard it, then call `get_console` on that
       tab — confirm `not_subscribed`, not stale cached messages
 
+### Private windows (open_private_window, list_tabs incognito field)
+
+- [ ] With "Run in Private Windows" left at its default (OFF) for this
+      extension, call `open_private_window()` — confirm
+      `private_window_access_denied` and that no new window actually opens
+      (check the Firefox window list, not just the tool response)
+- [ ] Enable "Run in Private Windows" for this extension in `about:addons`,
+      restart Firefox if needed, then call `open_private_window()` with no
+      `url` — confirm `ok: true`, a blank private window opens, and
+      `list_tabs` shows the returned `tabId` with `leasedBy` set to this
+      session and `incognito: true`
+- [ ] Call `open_private_window(url)` with a real URL — confirm the new tab
+      navigates there (check via `read_page` or `list_tabs`'s `url` field)
+- [ ] Call `open_private_window(url)` with a blacklisted URL — confirm it
+      triggers the same confirmation prompt as `navigate`/`acquire_tab`;
+      decline it and confirm `blacklisted_denied`
+- [ ] With the tab from a step above, run an ordinary tool against it
+      (`click`, `navigate`, or `read_page`) and confirm it works — this is
+      the real end-to-end proof that the toggle plus this feature together
+      let the AI operate a private tab normally
+- [ ] Call `list_tabs` and confirm a normal (non-private) tab reports
+      `incognito: false`
+- [ ] Close the private window (`close_tab` on its last tab, or close it
+      manually) and confirm no dangling lease or state remains — a
+      follow-up `list_tabs` no longer shows that tab
+
+Not manually verified, documented as a known gap: `private_browsing_create_failed`
+(private browsing disabled by enterprise/system policy) requires a
+policy-managed Firefox profile to trigger, which isn't available in this
+project's normal dev setup — the code path is confirmed correct against
+Firefox's own source per the design spec's use-codex review, but not
+live-tested.
+
 ### Reader View (read_article)
 
 - [ ] `read_article` on a real news/blog article page returns a sensible `title` and

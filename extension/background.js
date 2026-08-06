@@ -261,6 +261,8 @@ async function handleNativeMessage(msg) {
         return onSessionEnded(msg.sessionId);
       case 'acquire_tab':
         return respond(await handleAcquireTab(msg));
+      case 'open_private_window':
+        return respond(await handleOpenPrivateWindow(msg));
       case 'release_tab':
         return respond(handleReleaseTab(msg));
       case 'close_tab':
@@ -504,6 +506,47 @@ async function handleAcquireTab(msg) {
   };
 }
 
+async function handleOpenPrivateWindow(msg) {
+  const sessionId = msg.sessionId;
+  const url = msg.url || 'about:blank';
+
+  // Preflight, confirmed necessary by use-codex review: without this,
+  // windows.create({incognito: true}) below throws Firefox's own
+  // "Extension does not have permission for incognito mode" -- catchable,
+  // but this gives callers a clean, dedicated error instead of parsing
+  // Firefox's raw rejection message.
+  const allowed = await browser.extension.isAllowedIncognitoAccess();
+  if (!allowed) return { ok: false, error: 'private_window_access_denied' };
+
+  // Same gate acquire_tab applies to new-tab URLs -- otherwise this tool
+  // is a way around navigate's blacklist confirmation.
+  const policy = await policyCheck(url, sessionId);
+  if (!policy.allowed) return { ok: false, error: policy.error };
+
+  let win;
+  try {
+    win = await browser.windows.create({ url, incognito: true });
+  } catch (err) {
+    // The permission case is already handled by the preflight above -- this
+    // catch is for the remaining rejection cause, confirmed by use-codex
+    // review against Firefox's source: private browsing disabled entirely by
+    // enterprise/system policy (DisablePrivateBrowsing). Real message
+    // preserved rather than asserting a specific cause, since other
+    // rejections are theoretically possible too.
+    return { ok: false, error: `private_browsing_create_failed: ${err.message}` };
+  }
+
+  // win.tabs is reliably populated by windows.create() on Firefox (confirmed
+  // by use-codex review against MDN) -- no need to re-query.
+  const tab = win.tabs[0];
+
+  if (leaseOwner.get(tab.id) && leaseOwner.get(tab.id) !== sessionId) {
+    return { ok: false, error: 'conflict' };
+  }
+  leaseOwner.set(tab.id, sessionId);
+  return { ok: true, windowId: win.id, tabId: tab.id };
+}
+
 function handleReleaseTab(msg) {
   const lease = checkLease(msg.sessionId, msg.tabId);
   if (!lease.ok) return { ok: false, error: lease.error };
@@ -691,6 +734,7 @@ async function handleListTabs() {
       cookieStoreId: t.cookieStoreId,
       discarded: t.discarded,
       lastAccessed: t.lastAccessed,
+      incognito: t.incognito,
     })),
   };
 }
