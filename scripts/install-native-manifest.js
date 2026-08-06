@@ -36,8 +36,8 @@ async function writeLauncherScript(manifestDir) {
   // Firefox spawns whatever `path` the manifest points to directly; on most
   // systems that must be an executable, not a .js file handed to `node`.
   // A tiny shell launcher keeps the manifest pointing at something spawnable
-  // without requiring native-host/src/index.js itself to have a shebang
-  // (Windows compatibility, if ever added, would need a .bat variant instead).
+  // without requiring native-host/src/index.js itself to have a shebang.
+  // On win32 this writes a .cmd launcher instead (see below).
   //
   // Firefox launched from Finder/Dock gets a minimal PATH that typically
   // does NOT include Homebrew's /opt/homebrew/bin (Apple Silicon) or

@@ -29,6 +29,18 @@ async function acquireSingletonLock(dir) {
     try {
       const handle = await open(lockPath, 'wx'); // fails if the file already exists
       await handle.writeFile(String(process.pid));
+
+      // TOCTOU guard: another process racing to take over a stale lock can
+      // read the old (dead) owner before we recreated the file, then unlink
+      // and recreate it after we did -- silently stealing our lock while we
+      // still believe we hold it. Re-read what's actually on disk before
+      // trusting the acquisition.
+      const verifyPid = Number((await readFile(lockPath, 'utf8')).trim());
+      if (verifyPid !== process.pid) {
+        await handle.close().catch(() => {});
+        throw new Error(`Lost a race acquiring the native-host lock (lock file: ${lockPath}).`);
+      }
+
       return { lockPath, handle };
     } catch (err) {
       if (err.code !== 'EEXIST') throw err;
@@ -58,7 +70,8 @@ async function acquireSingletonLock(dir) {
       }
 
       throw new Error(
-        `Another native-host instance appears to be running (lock file: ${lockPath}).`
+        `Another native-host instance appears to be running (lock file: ${lockPath}). ` +
+        `If you're sure no other instance is running, delete the lock file and retry.`
       );
     }
   }

@@ -190,3 +190,79 @@ test('a malformed frame from Firefox does not kill the singleton host', async ()
     }
   );
 });
+
+test('a second host started while the first is alive refuses to run', async () => {
+  await withHost(
+    () => {},
+    async ({ socketDir }) => {
+      const runtime = path.dirname(socketDir);
+      const second = spawn(process.execPath, [HOST_ENTRY], {
+        env: { ...process.env, XDG_RUNTIME_DIR: runtime },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stderr = '';
+      second.stderr.on('data', (chunk) => { stderr += chunk; });
+      second.stdout.resume();
+      const [code] = await once(second, 'exit');
+
+      assert.equal(code, 1);
+      assert.match(stderr, /Another native-host instance appears to be running/);
+    }
+  );
+});
+
+test('a stale lock left by a killed host is taken over by the next one', async () => {
+  const runtime = await mkdtemp(path.join(tmpdir(), 'fb-host-itest-'));
+  try {
+    const first = spawn(process.execPath, [HOST_ENTRY], {
+      env: { ...process.env, XDG_RUNTIME_DIR: runtime },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    first.stderr.resume();
+    first.stdout.resume();
+    const socketDir = path.join(runtime, 'firefox-bridge');
+    let client;
+    for (let i = 0; i < 100 && !client; i += 1) {
+      try {
+        client = await connectClient(socketDir);
+      } catch {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    }
+    assert.ok(client, 'first host never became connectable');
+    client.close();
+
+    // SIGKILL bypasses the process.on('exit', ...) lock cleanup, leaving a
+    // stale lock file behind -- the scenario acquireSingletonLock's dead-PID
+    // takeover exists to handle.
+    first.kill('SIGKILL');
+    await once(first, 'exit');
+
+    const second = spawn(process.execPath, [HOST_ENTRY], {
+      env: { ...process.env, XDG_RUNTIME_DIR: runtime },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    second.stderr.resume();
+    second.stdout.resume();
+    try {
+      let secondClient;
+      for (let i = 0; i < 100 && !secondClient; i += 1) {
+        try {
+          secondClient = await connectClient(socketDir);
+        } catch {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      }
+      assert.ok(secondClient, 'second host never took over the stale lock');
+      secondClient.close();
+    } finally {
+      if (second.exitCode === null && second.signalCode === null) {
+        const exited = once(second, 'exit');
+        second.kill('SIGTERM');
+        await exited;
+      }
+    }
+  } finally {
+    await rm(runtime, { recursive: true, force: true });
+  }
+});
