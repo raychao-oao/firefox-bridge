@@ -44,7 +44,7 @@ you're already using, logged into whatever you're logged into.
 
 `navigate`, `click`, `type`, `read_page`, `read_article`, `list_elements`, `list_frames`, `screenshot`,
 `scroll_to`, `press_key`, `hover`, `drag_and_drop`, `upload_file`, `start_console`/`get_console`, `start_network`/`get_network`,
-`acquire_tab`/`release_tab`, `close_tab`, `go_back`, `go_forward`, `list_tabs`,
+`acquire_tab`/`release_tab`, `close_tab`, `discard_tab`, `go_back`, `go_forward`, `list_tabs`,
 `search_history`, `add_bookmark`, `list_bookmarks`, `search_bookmarks`, `to_be_deleted`,
 `list_containers`, `create_container`, `wait_for`.
 
@@ -232,6 +232,9 @@ manual checklist to run through after changes there.
   container via `acquire_tab`'s `cookieStoreId` gives the agent that container's logged-in
   session, and the URL blacklist remains the only control surface; there is no separate
   per-container opt-out
+- `discard_tab` isn't policy-gated and doesn't require a lease — any session can unload any
+  tab in any window, including tabs no session has acquired (deliberate; that's the primary
+  use case)
 - Console/network capture is top-frame only, not frame-aware
 - Text truncation is char-count-based, not byte-based (risk on CJK-heavy pages)
 - WebMCP integration deferred to a future version

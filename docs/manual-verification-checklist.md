@@ -293,6 +293,9 @@ that automated unit tests can't cover (real Firefox + real process spawning).
 - [ ] Call `list_tabs` and confirm `discarded` and `lastAccessed` are present and
       correct (discarded tab from above shows `discarded: true`; a
       freshly-focused tab shows a recent `lastAccessed`)
+- [ ] Discard a leased tab, then call `read_page` on it — confirm `tab_not_loaded`
+- [ ] Call `start_console` on a tab, discard it, then call `get_console` on that
+      tab — confirm `not_subscribed`, not stale cached messages
 
 ### Reader View (read_article)
 

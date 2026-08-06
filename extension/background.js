@@ -543,7 +543,13 @@ async function discardOneTab(sessionId, tabId) {
   } catch (err) {
     return { tabId, ok: false, error: `unknown_tab: ${err.message}` };
   }
-  if (tab.discarded) return { tabId, ok: true }; // already discarded -- idempotent
+  if (tab.discarded) {
+    // already discarded -- idempotent. Still clear any stale console capture:
+    // discarding destroys console-inject.js's MAIN-world context, so a prior
+    // start_console subscription on this tab is dead either way.
+    consoleBuffers.delete(tabId);
+    return { tabId, ok: true };
+  }
   if (tab.active) return { tabId, ok: false, error: 'cannot_discard_active_tab' };
 
   try {
@@ -573,6 +579,12 @@ async function discardOneTab(sessionId, tabId) {
       error: after.active ? 'cannot_discard_active_tab' : 'cannot_discard_tab',
     };
   }
+  // Discarding destroys console-inject.js's MAIN-world execution context;
+  // Firefox's auto-reload on refocus does not re-inject it. Clear any
+  // console capture so get_console reports not_subscribed instead of stale
+  // cached messages. networkBuffers is unaffected -- webRequest-based
+  // capture is background-side and survives a discard, so leave it alone.
+  consoleBuffers.delete(tabId);
   return { tabId, ok: true };
 }
 
