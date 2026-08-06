@@ -273,3 +273,22 @@ that automated unit tests can't cover (real Firefox + real process spawning).
       denied page briefly appears despite the denial (expected, a pre-existing
       limitation of the capture buffer not being cleared on navigation, not a
       regression to fix here)
+
+### Reader View (read_article)
+
+- [ ] `read_article` on a real news/blog article page returns a sensible `title` and
+      `text`, and the text is visibly cleaner than the same page's `read_page` output
+      (no nav/ads/sidebar text)
+- [ ] `read_article` on a non-article page (e.g. an app dashboard, a product listing)
+      returns `not_an_article`
+- [ ] `read_article` on a tab that predates the extension loading — open a tab, reload
+      the extension, then call `read_article` on that pre-existing tab without
+      navigating it first — still succeeds (confirms the on-demand `readability.js`
+      injection covers this case)
+- [ ] `read_article` without a lease on the target `tabId` — confirm `not_leased`
+- [ ] `read_article` on a blacklisted URL triggers the same confirmation gate
+      `read_page` does (confirms `privilegedGate` wiring, not just a lease check)
+- [ ] A very long article triggers `truncated: true` with a correct `totalLength`
+- [ ] `read_article` without `frameId` on a page with an iframe containing separate
+      article-shaped content only reads the top frame (confirms the top-frame-only
+      default, not an aggregate scan across frames)

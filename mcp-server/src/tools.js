@@ -105,6 +105,29 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'read_article',
+    {
+      description:
+        "Extract clean article content from a leased tab's page using Firefox's own " +
+        "Reader View engine (Mozilla's Readability.js) -- strips nav/ads/sidebars, " +
+        "returning just the article. Unlike `read_page`, this always targets a single " +
+        "frame (`frameId` defaults to 0, the top frame, when omitted -- it does NOT scan " +
+        "every frame). Returns `{ok, title, byline, siteName, excerpt, text, truncated, " +
+        "totalLength}` on success. `text` is plain text (not HTML), truncated at the same " +
+        "500,000-char cap `read_page` uses. Returns `{ok: false, error: 'not_an_article'}` " +
+        "when the page isn't article-shaped (SPA shell, product listing, etc.) -- this is " +
+        "a normal outcome, not a failure to retry. A page that hasn't finished loading " +
+        "(slow SPA, paywall) can also produce a false `not_an_article` -- use `wait_for` " +
+        "first if that's suspected.",
+      inputSchema: { tabId: z.number(), frameId: z.number().optional() },
+    },
+    async ({ tabId, frameId }) => {
+      const result = await bridgeClient.call({ type: 'read_article', tabId, frameId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'list_elements',
     {
       description:

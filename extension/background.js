@@ -289,6 +289,8 @@ async function handleNativeMessage(msg) {
         return respond(await handleToBeDeleted(msg));
       case 'click':
         return respond(await handleClick(msg));
+      case 'read_article':
+        return respond(await handleReadArticle(msg));
       case 'type':
       case 'read_page':
       case 'list_elements':
@@ -1283,6 +1285,20 @@ async function handleClick(msg) {
     // caller would never learn a search wasn't exhaustive.
     ...(result.frameSearchIncomplete ? { frameSearchIncomplete: true } : {}),
   };
+}
+
+async function handleReadArticle(msg) {
+  const frameId = msg.frameId ?? 0;
+  const gate = await privilegedGate(msg, { frameId });
+  if (!gate.ok) return gate;
+
+  try {
+    await browser.tabs.executeScript(msg.tabId, { file: 'readability.js', frameId });
+  } catch (err) {
+    return { ok: false, error: `unknown_tab: ${err.message}` };
+  }
+
+  return sendToFrame(msg.tabId, frameId, { ...msg, frameId });
 }
 
 async function forwardToContentScript(msg) {

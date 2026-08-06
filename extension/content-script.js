@@ -244,6 +244,34 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       return Promise.resolve({ ok: true, text: full, truncated: false });
     }
 
+    if (msg.type === 'read_article') {
+      if (typeof Readability === 'undefined') {
+        return Promise.resolve({ ok: false, error: 'readability_unavailable' });
+      }
+      const MAX_TEXT_CHARS = 500000; // same cap read_page uses
+      let article;
+      try {
+        article = new Readability(document.cloneNode(true)).parse();
+      } catch (err) {
+        return Promise.resolve({ ok: false, error: `readability_parse_failed: ${err.message}` });
+      }
+      if (!article) {
+        return Promise.resolve({ ok: false, error: 'not_an_article' });
+      }
+      const full = article.textContent || '';
+      const truncated = full.length > MAX_TEXT_CHARS;
+      return Promise.resolve({
+        ok: true,
+        title: article.title,
+        byline: article.byline,
+        siteName: article.siteName,
+        excerpt: article.excerpt,
+        text: truncated ? full.slice(0, MAX_TEXT_CHARS) : full,
+        truncated,
+        totalLength: full.length,
+      });
+    }
+
     if (msg.type === 'list_elements') {
       // Interactive-element candidates only -- a page-wide "*" scan would
       // both blow past MAX_ELEMENTS instantly and return mostly noise
