@@ -330,6 +330,27 @@ project's normal dev setup — the code path is confirmed correct against
 Firefox's own source per the design spec's use-codex review, but not
 live-tested.
 
+### acquire_tab windowId, list_tabs windowId field
+
+- [ ] Call `open_private_window()`, note its `windowId`. Call `list_tabs`
+      and confirm that tab's `windowId` matches.
+- [ ] Call `acquire_tab({url: "https://example.com", windowId: <that
+      windowId>})` — confirm `ok: true`, the new tab's `url` reflects
+      `example.com`, and a follow-up `list_tabs` shows the new tab with the
+      *same* `windowId` as the private window from the step above (proving
+      it landed in the right window, not wherever "current" happened to be)
+- [ ] Call `acquire_tab({tabId: <any existing leased tab>, windowId: <any
+      windowId>})` — confirm `window_id_requires_new_tab`
+- [ ] Call `acquire_tab({windowId: 999999999})` (a `windowId` that doesn't
+      exist) — confirm `window_not_found`
+- [ ] Call `acquire_tab({windowId: <a private window's windowId>,
+      cookieStoreId: <any real container's cookieStoreId from
+      list_containers>})` — confirm `container_unavailable_in_private_window`,
+      and confirm via `list_tabs` that no new tab was actually created
+- [ ] Call `list_tabs` and confirm every tab (private and normal) reports a
+      `windowId` that matches what Firefox's own window list shows for that
+      tab
+
 ### Reader View (read_article)
 
 - [ ] `read_article` on a real news/blog article page returns a sensible `title` and

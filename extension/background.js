@@ -431,6 +431,9 @@ async function handleAcquireTab(msg) {
   if (msg.tabId != null && msg.cookieStoreId != null) {
     return { ok: false, error: 'cookie_store_requires_new_tab' };
   }
+  if (msg.tabId != null && msg.windowId != null) {
+    return { ok: false, error: 'window_id_requires_new_tab' };
+  }
   let tab;
   let urlPending = false;
   if (msg.tabId != null) {
@@ -446,6 +449,27 @@ async function handleAcquireTab(msg) {
     // Opening a NEW tab straight at a blacklisted URL must be gated too,
     // otherwise acquire_tab is a way around navigate's check.
     const url = msg.url || 'about:blank';
+
+    let targetWindow;
+    if (msg.windowId != null) {
+      // Argument/target validation before any user-facing gate, same
+      // rationale as the cookieStoreId existence check below -- a bogus
+      // windowId shouldn't trigger the blacklist confirmation dialog for a
+      // request that was always going to fail anyway.
+      try {
+        targetWindow = await browser.windows.get(msg.windowId);
+      } catch (err) {
+        return { ok: false, error: `window_not_found: ${err.message}` };
+      }
+      // Firefox's Multi-Account Containers don't exist in private windows --
+      // reject this combination with a purpose-built error before ever
+      // calling browser.tabs.create, rather than letting Firefox's own
+      // container/private-window incompatibility surface as a raw rejection.
+      if (targetWindow.incognito && msg.cookieStoreId != null) {
+        return { ok: false, error: 'container_unavailable_in_private_window' };
+      }
+    }
+
     if (msg.cookieStoreId != null) {
       // query({}) — not get() — because query() only fails when the
       // container feature itself is unavailable (e.g. the user disabled
@@ -470,9 +494,11 @@ async function handleAcquireTab(msg) {
     // real destination to wait for either way.
     const shouldWaitForCommit = Boolean(msg.url) && msg.url !== 'about:blank';
     const createTab = () =>
-      msg.cookieStoreId != null
-        ? browser.tabs.create({ url, cookieStoreId: msg.cookieStoreId })
-        : browser.tabs.create({ url });
+      browser.tabs.create({
+        url,
+        ...(msg.windowId != null ? { windowId: msg.windowId } : {}),
+        ...(msg.cookieStoreId != null ? { cookieStoreId: msg.cookieStoreId } : {}),
+      });
 
     if (shouldWaitForCommit) {
       const result = await createTabAndWaitForCommit(createTab);
@@ -502,6 +528,7 @@ async function handleAcquireTab(msg) {
     tabId: tab.id,
     url: tab.url,
     cookieStoreId: tab.cookieStoreId,
+    windowId: tab.windowId,
     ...(urlPending ? { urlPending: true } : {}),
   };
 }
@@ -735,6 +762,7 @@ async function handleListTabs() {
       discarded: t.discarded,
       lastAccessed: t.lastAccessed,
       incognito: t.incognito,
+      windowId: t.windowId,
     })),
   };
 }
