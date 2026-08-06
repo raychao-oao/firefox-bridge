@@ -1295,7 +1295,7 @@ async function handleReadArticle(msg) {
   try {
     await browser.tabs.executeScript(msg.tabId, { file: 'readability.js', frameId });
   } catch (err) {
-    return { ok: false, error: `unknown_tab: ${err.message}` };
+    return { ok: false, error: `readability_inject_failed: ${err.message}` };
   }
 
   return sendToFrame(msg.tabId, frameId, { ...msg, frameId });

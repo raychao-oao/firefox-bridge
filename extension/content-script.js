@@ -251,7 +251,7 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       const MAX_TEXT_CHARS = 500000; // same cap read_page uses
       let article;
       try {
-        article = new Readability(document.cloneNode(true)).parse();
+        article = new Readability(document.cloneNode(true), { maxElemsToParse: 100000 }).parse();
       } catch (err) {
         return Promise.resolve({ ok: false, error: `readability_parse_failed: ${err.message}` });
       }

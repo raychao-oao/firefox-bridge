@@ -118,7 +118,13 @@ export function registerTools(server, bridgeClient) {
         "when the page isn't article-shaped (SPA shell, product listing, etc.) -- this is " +
         "a normal outcome, not a failure to retry. A page that hasn't finished loading " +
         "(slow SPA, paywall) can also produce a false `not_an_article` -- use `wait_for` " +
-        "first if that's suspected.",
+        "first if that's suspected. Content rendered inside a Shadow DOM is invisible to " +
+        "this tool and will also surface as `not_an_article` -- this is structural (the " +
+        "extraction never sees shadow trees) and `wait_for` will not help. Returns " +
+        "`{ok: false, error: 'readability_inject_failed: ...'}` when the extraction " +
+        "engine can't be injected into the page, e.g. a restricted/privileged page like " +
+        "`about:*` or an extension store page -- this doesn't mean the tab is missing, " +
+        "just that injection was blocked.",
       inputSchema: { tabId: z.number(), frameId: z.number().optional() },
     },
     async ({ tabId, frameId }) => {
