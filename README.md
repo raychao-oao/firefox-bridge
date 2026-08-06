@@ -238,7 +238,10 @@ manual checklist to run through after changes there.
 - `open_private_window` requires the user to manually enable "Run in Private Windows" for
   this extension in `about:addons` first — Firefox gives extensions no API to do this
   themselves. Without it, the call fails outright with `private_window_access_denied`; no
-  window is created
+  window is created. The same toggle also gates visibility, not just action: without it,
+  `list_tabs` can't see private tabs at all — they're omitted from the list entirely, not
+  merely present-but-unreachable — so an absence of `incognito: true` entries doesn't mean
+  no private tabs are open
 - Console/network capture is top-frame only, not frame-aware
 - Text truncation is char-count-based, not byte-based (risk on CJK-heavy pages)
 - WebMCP integration deferred to a future version

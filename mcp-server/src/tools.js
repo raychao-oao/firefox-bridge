@@ -321,7 +321,7 @@ export function registerTools(server, bridgeClient) {
     'open_private_window',
     {
       description:
-        'Open a new Firefox private browsing window and lease its initial tab to this session (like acquire_tab -- no separate acquire_tab call needed). Pass url to navigate there immediately; omitted or "about:blank" opens a blank private tab. Requires the extension\'s "Run in Private Windows" toggle to be enabled by the user in about:addons -- Firefox gives extensions no API to enable this themselves, and without it this call fails outright with private_window_access_denied (no window is created). Subject to the same URL blacklist confirmation flow as acquire_tab/navigate (blacklisted_denied on decline).',
+        'Open a new Firefox private browsing window and lease its initial tab to this session (like acquire_tab -- no separate acquire_tab call needed). Pass url to navigate there immediately; omitted or "about:blank" opens a blank private tab. Unlike acquire_tab, this does not wait for the navigation to commit and does not return url; follow up with wait_for/read_page if you need the destination loaded. Requires the extension\'s "Run in Private Windows" toggle to be enabled by the user in about:addons -- Firefox gives extensions no API to enable this themselves, and without it this call fails outright with private_window_access_denied (no window is created). May also fail with private_browsing_create_failed, which is not only returned when private browsing is disabled by policy but also fires for an ordinary invalid, malformed, or privileged url argument (e.g. about:config) -- read the appended message for the real cause. Subject to the same URL blacklist confirmation flow as acquire_tab/navigate (blacklisted_denied on decline).',
       inputSchema: { url: z.string().optional() },
     },
     async ({ url }) => {
@@ -398,7 +398,7 @@ export function registerTools(server, bridgeClient) {
     'list_tabs',
     {
       description:
-        'List all open Firefox tabs (id, url, title, cookieStoreId, discarded, lastAccessed, incognito) and which are currently leased. `cookieStoreId` identifies which Multi-Account Container (if any) the tab belongs to -- see `list_containers`. `discarded` is true if Firefox has already unloaded the tab from memory. `lastAccessed` is a millisecond epoch timestamp of when the tab was last focused. `incognito` is true if the tab belongs to a private browsing window -- other tools can only reach it if the user has enabled "Run in Private Windows" for this extension in about:addons.',
+        'List all open Firefox tabs (id, url, title, cookieStoreId, discarded, lastAccessed, incognito) and which are currently leased. `cookieStoreId` identifies which Multi-Account Container (if any) the tab belongs to -- see `list_containers`. `discarded` is true if Firefox has already unloaded the tab from memory. `lastAccessed` is a millisecond epoch timestamp of when the tab was last focused. `incognito` is true if the tab belongs to a private browsing window -- private tabs appear in this list only if the user has enabled "Run in Private Windows" for this extension in about:addons; without it they are omitted from list_tabs entirely (not merely unreachable), so an absence of incognito: true entries does not mean no private tabs are open.',
       inputSchema: {},
     },
     async () => {
