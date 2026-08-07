@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { z } from 'zod';
 import { registerTools } from '../src/tools.js';
 
 function makeFakeServer() {
@@ -37,6 +38,16 @@ test('select_option is registered with the expected input schema keys', () => {
   assert.ok(schema.text);
   assert.ok(schema.frameId);
   assert.ok(schema.expectedDomEpoch);
+
+  const shape = z.object(schema);
+
+  const validResult = shape.safeParse({ tabId: 1, selector: '#x', text: 'hello' });
+  assert.equal(validResult.success, true);
+  assert.equal(validResult.data.frameId, undefined);
+  assert.equal(validResult.data.expectedDomEpoch, undefined);
+
+  const invalidResult = shape.safeParse({ tabId: 'not-a-number', selector: '#x', text: 'hello' });
+  assert.equal(invalidResult.success, false);
 });
 
 test('select_option forwards to bridgeClient.call with type "select_option" and wraps a success result', async () => {

@@ -208,6 +208,9 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       if (el.tagName !== 'SELECT') {
         return Promise.resolve({ ok: false, error: 'not_a_select' });
       }
+      // Deliberately no el.focus() here (unlike `type`) -- avoids firing unrelated
+      // focus/blur handlers, and no ecosystem this needs to support requires focus
+      // for a select's value change to be observed.
       if (el.multiple) {
         return Promise.resolve({ ok: false, error: 'multiple_select_not_supported' });
       }

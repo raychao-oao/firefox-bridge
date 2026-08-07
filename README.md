@@ -35,14 +35,14 @@ you're already using, logged into whatever you're logged into.
   path — read the file directly rather than expecting image bytes in the tool response.
   Pass `fullPage: true` to capture the entire scrollable page in one shot instead of just
   the current viewport.
-- **Frame-aware**: `click`/`type`/`read_page`/`list_elements`/`scroll_to`/`hover`/
-  `upload_file`/`drag_and_drop`/`press_key` can target a specific `<iframe>` (discovered
+- **Frame-aware**: `click`/`type`/`select_option`/`read_page`/`list_elements`/`scroll_to`/
+  `hover`/`upload_file`/`drag_and_drop`/`press_key` can target a specific `<iframe>` (discovered
   via `list_frames`); each frame is gated by its own blacklist policy independently, so an
   allowed top-level page can't become a path to read a blacklisted embedded frame.
 
 ## Tools
 
-`navigate`, `click`, `type`, `read_page`, `read_article`, `list_elements`, `list_frames`, `screenshot`,
+`navigate`, `click`, `type`, `select_option`, `read_page`, `read_article`, `list_elements`, `list_frames`, `screenshot`,
 `scroll_to`, `press_key`, `hover`, `drag_and_drop`, `upload_file`, `start_console`/`get_console`, `start_network`/`get_network`,
 `acquire_tab`/`release_tab`, `open_private_window`, `close_tab`, `discard_tab`, `go_back`, `go_forward`, `list_tabs`,
 `search_history`, `add_bookmark`, `list_bookmarks`, `search_bookmarks`, `to_be_deleted`,
