@@ -111,8 +111,14 @@ judgment mid-script, in contrast to `firefox-bridge`'s step-by-step tools, where
 model decides what to do next after every step. It must be registered separately from
 `firefox-bridge` — both can be enabled at once, or just one:
 ```
-claude mcp add firefox-bridge-bot -s user -- node firefox-bridge-bot/index.js
+claude mcp add firefox-bridge-bot -s user -- node /absolute/path/to/firefox-bridge/repo/firefox-bridge-bot/index.js
 ```
+Replace `/absolute/path/to/firefox-bridge/repo` with this repo's actual location on your
+machine (run `pwd` from inside `repo/` to get it). Unlike some other `claude mcp add`
+invocations, a relative path here gets stored verbatim rather than resolved automatically —
+if the MCP server ever fails to start, an unresolved relative path is the first thing to
+check.
+
 Currently ships one tool: `read_url_fast` — reads up to 10 URLs' content in a single call.
 
 ### Windows
