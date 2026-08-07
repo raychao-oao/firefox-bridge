@@ -180,6 +180,40 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         el.dispatchEvent(new Event('change', { bubbles: true }));
         return Promise.resolve({ ok: true });
       }
+      if (el.isContentEditable) {
+        // Checked directly here (not the stricter isEditableRoot restriction
+        // list_elements uses for labeling) -- type should still work on any
+        // genuinely editable element, including one editable only by
+        // inheriting from an ancestor. No native value setter applies to a
+        // contenteditable -- select all of its existing content (a Range,
+        // not Selection.selectAllChildren, because Range.selectNodeContents
+        // is well-defined even when el has zero child nodes, e.g. an empty
+        // chat box) then let execCommand replace the selection and insert
+        // msg.text in one call. This fires the browser's native
+        // beforeinput/input events with inputType:'insertText', which is
+        // what framework-bound contenteditable widgets (Angular's
+        // ContentEditable directive, etc.) actually listen for -- a
+        // synthetic `new Event('input')` carries no inputType and would not
+        // match a beforeinput-gated handler. execCommand is deprecated
+        // web-platform-wide but remains fully functional in Firefox for
+        // exactly this (unformatted text insertion into a contenteditable)
+        // -- this project targets Firefox only, so no fallback is needed.
+        // Its boolean return value is checked (not assumed) since it can
+        // report failure without throwing.
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        const inserted = document.execCommand('insertText', false, msg.text);
+        if (!inserted) {
+          return Promise.resolve({ ok: false, error: 'contenteditable_insert_failed' });
+        }
+        return Promise.resolve({ ok: true });
+      }
+      if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') {
+        return Promise.resolve({ ok: false, error: 'not_typable' });
+      }
       const setter = Object.getOwnPropertyDescriptor(
         el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
         'value'
@@ -394,7 +428,7 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       // (click/type only ever target things a user could actually interact
       // with).
       const CANDIDATE_SELECTOR =
-        'a, button, input, select, textarea, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"], summary, tr, th';
+        'a, button, input, select, textarea, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"], summary, tr, th, [contenteditable="true"], [contenteditable="plaintext-only"], [contenteditable=""]';
       // Caps the response well under the 1 MiB native-messaging frame limit
       // even on a link-heavy page; excess candidates are dropped, not
       // paginated -- MVP scope, revisit if this proves too small in practice.
@@ -543,12 +577,34 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         if (tagName === 'input' && (normalizedType === 'checkbox' || normalizedType === 'radio')) {
           state.checked = el.checked;
         }
+        // isEditableRoot requires BOTH that el's OWN contenteditable attribute
+        // is directly set to an editable value AND that the browser confirms
+        // it's actually live-editable (el.isContentEditable). el.isContentEditable
+        // alone is not enough -- it also returns true for an unrelated element
+        // (e.g. a <button>) that merely inherits editability by sitting inside
+        // a contenteditable ancestor, which must NOT be mislabeled as a
+        // text-entry field. hasAttribute() is checked separately (not just
+        // getAttribute() ?? '') because an element with NO contenteditable
+        // attribute at all and one with contenteditable="" (a valid spelling
+        // of "true") would otherwise both normalize to the same empty string
+        // -- live-verification against a nested <button> inside a
+        // contenteditable ancestor caught this collapsing the two cases and
+        // mislabeling the button as an editable root.
+        const hasOwnContentEditable = el.hasAttribute('contenteditable');
+        const rawContentEditable = hasOwnContentEditable
+          ? el.getAttribute('contenteditable').toLowerCase()
+          : null;
+        const isEditableRoot =
+          el.isContentEditable &&
+          hasOwnContentEditable &&
+          (rawContentEditable === 'true' || rawContentEditable === 'plaintext-only' || rawContentEditable === '');
         if (
           (tagName === 'input' && !isValueExcluded) ||
           tagName === 'textarea' ||
-          tagName === 'select'
+          tagName === 'select' ||
+          isEditableRoot
         ) {
-          const rawValue = el.value ?? '';
+          const rawValue = isEditableRoot ? el.innerText : (el.value ?? '');
           state.value = rawValue.slice(0, MAX_VALUE_CHARS);
           if (rawValue.length > MAX_VALUE_CHARS) state.valueTruncated = true;
         }
@@ -557,6 +613,9 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         }
         if ((tagName === 'input' && !READONLY_INAPPLICABLE_TYPES.has(normalizedType)) || tagName === 'textarea') {
           state.readonly = el.readOnly;
+        }
+        if (isEditableRoot) {
+          state.contentEditable = true;
         }
         if (el.hasAttribute('aria-expanded')) {
           state.ariaExpanded = el.getAttribute('aria-expanded');

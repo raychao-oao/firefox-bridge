@@ -589,3 +589,63 @@ Firefox, and `acquire_tab`/`navigate` to it (`file://` URL):
       (e.g. captured from a `list_elements` call, then reload the page, then
       call `select_option` with that now-stale value) — confirm
       `{ok:false, error:'stale_selector'}`
+
+### contenteditable support (type, list_elements)
+
+Prerequisite: `npm test` and `node --check extension/content-script.js
+mcp-server/src/tools.js` (run from `repo/`) both pass.
+
+Fixture (save as `/tmp/contenteditable-fixture.html`, serve via
+`python3 -m http.server 8935 --bind 127.0.0.1` from `/tmp` — `acquire_tab`
+rejects `file://` URLs):
+
+```html
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<div id="ce1" contenteditable="true">既有內容 existing content</div>
+<div id="ce2" contenteditable="true"></div>
+<div id="ce3" contenteditable="false">not editable</div>
+<div id="ce4">plain div, no contenteditable</div>
+<span id="ce5">plain span, no contenteditable</span>
+<div id="ce6" contenteditable="true" oninput="document.getElementById('ce6-out').textContent = event.inputType || '(no inputType)'"></div>
+<span id="ce6-out"></span>
+<div id="ce7" contenteditable="true"><button id="ce7-btn">nested button</button></div>
+</body></html>
+```
+
+If testing against a temporary/unpacked extension load, reload it in
+`about:debugging` after any code change, then reconnect the MCP session if
+already connected.
+
+- [ ] `list_elements` on the fixture page — confirm `#ce1`/`#ce2` appear as
+      candidates with `state.contentEditable: true`
+- [ ] `#ce1`'s reported `state.value` reads `"既有內容 existing content"`
+- [ ] `#ce3`, `#ce4`, `#ce5` do NOT carry `state.contentEditable: true` in
+      their `state` object
+- [ ] `#ce7-btn` (a `<button>` nested inside `#ce7`, a `contenteditable`
+      ancestor) does NOT carry `state.contentEditable: true` — confirms
+      inherited editability is not mistaken for a direct editable root
+- [ ] `type` targeting `#ce1` with new text — confirm `{ok:true}`, then
+      `list_elements` again and confirm `#ce1`'s `state.value` is exactly
+      the new text (old content fully replaced, not appended)
+- [ ] `type` targeting `#ce2` (empty) with text — confirm `{ok:true}` and
+      `state.value` becomes that text
+- [ ] `type` targeting `#ce3` (`contenteditable="false"`) — confirm
+      `{ok:false, error:'not_typable'}`
+- [ ] `type` targeting `#ce4` (plain div, no contenteditable) — confirm
+      `{ok:false, error:'not_typable'}` (regression check: this previously
+      threw an unhandled "Illegal invocation" error instead of a clean
+      failure response)
+- [ ] `type` targeting `#ce5` (plain span, no contenteditable) — confirm
+      `{ok:false, error:'not_typable'}`
+- [ ] `type` targeting `#ce6` with any text — confirm `{ok:true}`, then
+      `list_elements` on `#ce6-out` and confirm its text is exactly
+      `"insertText"` (proves the real dispatched event's `inputType`
+      matches what this feature promises, not just a successful bridge
+      response)
+- [ ] Original motivating case (skip if not signed in to Gemini — the
+      fixture above already covers the same code paths): navigate to
+      `https://gemini.google.com/app`, run `list_elements`, confirm the
+      chat input appears with `state.contentEditable: true`, call `type`
+      against it with a short test message, and confirm the message text
+      visibly appears in the chat input before sending
