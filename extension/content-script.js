@@ -41,6 +41,17 @@ if (window.__firefoxBridgeContentScriptInstalled) {
     return bytes;
   }
 
+  // Canonical "what a real user sees" text for an <option>: option.label is
+  // the HTML-standard displayed text (an explicit label attribute if set,
+  // else the option's own default label -- already whitespace-collapsed per
+  // spec). The extra \s+ replace adds Unicode whitespace normalization (e.g.
+  // NBSP) on top of the standard's ASCII-only collapse. Shared between
+  // list_elements' <select> options serialization and select_option's
+  // matching so the two never disagree about an option's text.
+  function fbOptionDisplayText(option) {
+    return (option.label || '').trim().replace(/\s+/gu, ' ');
+  }
+
   // press_key's best-effort code/keyCode/which mapping for common control
   // keys -- KeyboardEvent's constructor dictionary defaults `code`/`keyCode`
   // to empty/0, which the modern `key`-only idiom never needed, but a lot of
@@ -181,6 +192,111 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return Promise.resolve({ ok: true });
+    }
+
+    if (msg.type === 'select_option') {
+      if (msg.expectedDomEpoch !== undefined && msg.expectedDomEpoch !== domEpoch) {
+        return Promise.resolve({ ok: false, error: 'stale_selector' });
+      }
+      let el;
+      try {
+        el = document.querySelector(msg.selector);
+      } catch (err) {
+        return Promise.resolve({ ok: false, error: 'invalid_selector' });
+      }
+      if (!el) return Promise.resolve({ ok: false, error: 'element_not_found' });
+      if (el.tagName !== 'SELECT') {
+        return Promise.resolve({ ok: false, error: 'not_a_select' });
+      }
+      // Deliberately no el.focus() here (unlike `type`) -- avoids firing unrelated
+      // focus/blur handlers, and no ecosystem this needs to support requires focus
+      // for a select's value change to be observed.
+      if (el.multiple) {
+        return Promise.resolve({ ok: false, error: 'multiple_select_not_supported' });
+      }
+      if (el.matches(':disabled')) {
+        return Promise.resolve({ ok: false, error: 'select_disabled' });
+      }
+
+      const normalizedQuery = (msg.text || '').trim().replace(/\s+/gu, ' ');
+      if (normalizedQuery === '') {
+        return Promise.resolve({ ok: false, error: 'empty_text' });
+      }
+
+      const options = Array.from(el.options).map((o, index) => ({
+        index,
+        value: o.value,
+        text: fbOptionDisplayText(o),
+        disabled: o.matches(':disabled'),
+      }));
+      const MAX_AMBIGUOUS_MATCHES = 20;
+      const ambiguous = (matches) => Promise.resolve({
+        ok: false,
+        error: 'ambiguous_match',
+        matches: matches.slice(0, MAX_AMBIGUOUS_MATCHES),
+        ...(matches.length > MAX_AMBIGUOUS_MATCHES ? { matchesTruncated: true } : {}),
+      });
+
+      // Two-tier match: exact text first (checked for ambiguity on its own
+      // before ever trying substring), then substring only if there was no
+      // exact match at all. A duplicate-text pair at either tier is reported
+      // as ambiguous_match, never silently resolved to "the first one" --
+      // silently picking one for a caller who couldn't tell two options
+      // apart from the text alone would be a real selection-error risk on
+      // pages like coolpc.com.tw's estimate page.
+      const exactMatches = options.filter((o) => o.text === normalizedQuery);
+      let matched;
+      if (exactMatches.length === 1) {
+        matched = exactMatches[0];
+      } else if (exactMatches.length > 1) {
+        return ambiguous(exactMatches);
+      } else {
+        const substringMatches = options.filter((o) => o.text.includes(normalizedQuery));
+        if (substringMatches.length === 1) {
+          matched = substringMatches[0];
+        } else if (substringMatches.length > 1) {
+          return ambiguous(substringMatches);
+        } else {
+          return Promise.resolve({ ok: false, error: 'option_not_found' });
+        }
+      }
+
+      if (matched.disabled) {
+        return Promise.resolve({ ok: false, error: 'option_disabled' });
+      }
+
+      if (el.selectedIndex === matched.index) {
+        // No-op: mirrors what a real user re-selecting the already-selected
+        // option would produce -- no new input/change.
+        return Promise.resolve({ ok: true, value: matched.value, text: matched.text, changed: false });
+      }
+
+      // selectedIndex, not `el.value = matched.value` -- the HTML standard
+      // defines the value setter as selecting the FIRST option with that
+      // value, which would silently select the wrong option if two options
+      // share a value.
+      el.selectedIndex = matched.index;
+      el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+
+      // Re-read after dispatch rather than trusting the assignment above --
+      // a synchronous change handler (a controlled-component re-render, the
+      // page's own onchange logic, or code that clears/replaces the select
+      // entirely) could have changed the selection again, or left nothing
+      // selected, before this returns. Do NOT fall back to `matched` here:
+      // if el.options[el.selectedIndex] is now undefined (selectedIndex was
+      // reset to -1, or the options list was cleared), that means nothing is
+      // actually selected anymore, and claiming `matched`'s old value/text
+      // would be reporting a false success. Report null in that case instead
+      // -- still ok:true (the selection attempt itself did happen and did
+      // dispatch real events), but honest about the current state.
+      const finalOption = el.options[el.selectedIndex];
+      return Promise.resolve({
+        ok: true,
+        value: finalOption ? finalOption.value : null,
+        text: finalOption ? fbOptionDisplayText(finalOption) : null,
+        changed: true,
+      });
     }
 
     if (msg.type === 'hover') {
@@ -455,12 +571,14 @@ if (window.__firefoxBridgeContentScriptInstalled) {
           text: label,
           type: rawType || undefined,
           href: el.getAttribute('href') || undefined,
-          // A <select>'s value setter needs the option's `value` (falling
-          // back to its text) verbatim -- expose both since HTML often
-          // leaves `value` implicit (defaults to the option's text content).
+          // `value` is the option's form value (what `type`'s <select>
+          // handling matches against first). `text` is the canonical
+          // DISPLAYED label -- see fbOptionDisplayText above -- which is
+          // what `select_option`'s text matching (and a human reading this
+          // list) actually compares against.
           options:
             tagName === 'select'
-              ? Array.from(el.options).map((o) => ({ value: o.value, text: o.textContent.trim() }))
+              ? Array.from(el.options).map((o) => ({ value: o.value, text: fbOptionDisplayText(o) }))
               : undefined,
           state,
         });
