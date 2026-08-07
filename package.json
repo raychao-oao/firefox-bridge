@@ -5,7 +5,8 @@
   "license": "MIT",
   "workspaces": [
     "native-host",
-    "mcp-server"
+    "mcp-server",
+    "firefox-bridge-bot"
   ],
   "engines": {
     "node": ">=20"
