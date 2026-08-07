@@ -610,6 +610,12 @@ rejects `file://` URLs):
 <div id="ce6" contenteditable="true" oninput="document.getElementById('ce6-out').textContent = event.inputType || '(no inputType)'"></div>
 <span id="ce6-out"></span>
 <div id="ce7" contenteditable="true"><button id="ce7-btn">nested button</button></div>
+<div id="ce8" contenteditable="true">editable host <input id="ce8-input" value="orig"><textarea id="ce8-ta">origta</textarea></div>
+<div id="ce9" contenteditable="TRUE">uppercase editable</div>
+<div id="ce10" contenteditable="">bare empty attribute editable</div>
+<div id="ce11" contenteditable="plaintext-only">plaintext only editable</div>
+<div id="ce12" contenteditable="false"><div id="ce12-inner" contenteditable="true">nested true inside false</div></div>
+<div id="ce13" contenteditable="true">inherit host <span id="ce13-span">inherited span</span></div>
 </body></html>
 ```
 
@@ -643,6 +649,48 @@ already connected.
       `"insertText"` (proves the real dispatched event's `inputType`
       matches what this feature promises, not just a successful bridge
       response)
+- [ ] `type` targeting `#ce8-input` (a native `<input>` nested inside `#ce8`,
+      a `contenteditable` ancestor) with new text — confirm `{ok:true}` AND
+      that `#ce8-input`'s own `state.value` (via `list_elements`) becomes the
+      new text, while `#ce8`'s own `state.value` (its `.innerText`) is
+      unchanged apart from that — regression check for the fix-round-1
+      Critical finding: this previously reported a false `{ok:true}` while
+      leaving `#ce8-input`'s value untouched and instead inserting the text
+      into `#ce8`'s surrounding text
+- [ ] `type` targeting `#ce8-ta` (a native `<textarea>` nested inside `#ce8`)
+      with new text — same check as `#ce8-input`: confirm `{ok:true}` and
+      that `#ce8-ta`'s own `state.value` becomes the new text via the normal
+      `<textarea>` setter path, not the contenteditable path
+- [ ] `list_elements` — confirm `#ce9` (`contenteditable="TRUE"`, uppercase)
+      appears as a candidate with `state.contentEditable: true` — regression
+      check: `CANDIDATE_SELECTOR`'s attribute-selector clauses are
+      case-insensitive (Firefox's `" i"` flag), matching how
+      `el.isContentEditable` itself treats the attribute's value
+- [ ] `list_elements` — confirm `#ce10` (bare `contenteditable=""`) appears
+      as a candidate with `state.contentEditable: true` (this is the case the
+      earlier `hasAttribute()` fix — distinguishing "attribute absent" from
+      "attribute present and empty" — was written for; this is its first
+      checklist coverage)
+- [ ] `list_elements` — confirm `#ce11` (`contenteditable="plaintext-only"`)
+      appears as a candidate with `state.contentEditable: true`
+- [ ] `list_elements` — confirm `#ce12-inner` (`contenteditable="true"`
+      nested inside `#ce12`, an ancestor with `contenteditable="false"`) DOES
+      carry `state.contentEditable: true`. Correction (this checklist
+      previously asserted the opposite — that the ancestor's `"false"`
+      overrides the inner `"true"`): live-verification disproved that claim.
+      Per the real HTML editing-host algorithm, an element's OWN explicit
+      `contenteditable="true"`/`"plaintext-only"` always governs regardless
+      of an ancestor's `"false"` (self is always the "nearest ancestor with
+      an explicit value" for itself) — an outer `"false"` only suppresses a
+      DESCENDANT that has no explicit `contenteditable` attribute of its own
+      (the ordinary inheritance case, same as `#ce7-btn`)
+- [ ] `type` targeting `#ce13-span` (a plain `<span>` with no `contenteditable`
+      attribute of its own, nested inside `#ce13`, a `contenteditable`
+      ancestor) with new text — confirm `{ok:true}` (it inherits
+      `isContentEditable` from `#ce13` and is not a native `<input>`/
+      `<textarea>`, so it correctly takes the contenteditable path, proving
+      `type` still works on an inherit-only editable descendant exactly as
+      `tools.js`'s description promises)
 - [ ] Original motivating case (skip if not signed in to Gemini — the
       fixture above already covers the same code paths): navigate to
       `https://gemini.google.com/app`, run `list_elements`, confirm the

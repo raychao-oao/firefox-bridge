@@ -159,7 +159,12 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       if (msg.expectedDomEpoch !== undefined && msg.expectedDomEpoch !== domEpoch) {
         return Promise.resolve({ ok: false, error: 'stale_selector' });
       }
-      const el = document.querySelector(msg.selector);
+      let el;
+      try {
+        el = document.querySelector(msg.selector);
+      } catch (err) {
+        return Promise.resolve({ ok: false, error: 'invalid_selector' });
+      }
       if (!el) return Promise.resolve({ ok: false, error: 'element_not_found' });
       el.focus();
       if (el.tagName === 'SELECT') {
@@ -180,32 +185,64 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         el.dispatchEvent(new Event('change', { bubbles: true }));
         return Promise.resolve({ ok: true });
       }
-      if (el.isContentEditable) {
+      // el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' is required here,
+      // not just an optimization: in Firefox a native form control nested
+      // inside a contenteditable ancestor (or on a document with
+      // document.designMode = 'on') also reports el.isContentEditable ===
+      // true. Without this exclusion such a control would incorrectly take
+      // the contenteditable branch below -- selecting/inserting into the
+      // SURROUNDING editing host instead of the control itself, reporting a
+      // false {ok:true} while the control's own value stays untouched. Native
+      // text controls always use the setter path further down, even when
+      // nested inside an editable ancestor.
+      if (el.isContentEditable && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') {
         // Checked directly here (not the stricter isEditableRoot restriction
         // list_elements uses for labeling) -- type should still work on any
         // genuinely editable element, including one editable only by
-        // inheriting from an ancestor. No native value setter applies to a
-        // contenteditable -- select all of its existing content (a Range,
-        // not Selection.selectAllChildren, because Range.selectNodeContents
-        // is well-defined even when el has zero child nodes, e.g. an empty
-        // chat box) then let execCommand replace the selection and insert
-        // msg.text in one call. This fires the browser's native
-        // beforeinput/input events with inputType:'insertText', which is
-        // what framework-bound contenteditable widgets (Angular's
-        // ContentEditable directive, etc.) actually listen for -- a
-        // synthetic `new Event('input')` carries no inputType and would not
-        // match a beforeinput-gated handler. execCommand is deprecated
-        // web-platform-wide but remains fully functional in Firefox for
-        // exactly this (unformatted text insertion into a contenteditable)
-        // -- this project targets Firefox only, so no fallback is needed.
-        // Its boolean return value is checked (not assumed) since it can
-        // report failure without throwing.
+        // inheriting from an ancestor (but NOT a nested native <input>/
+        // <textarea> -- see the exclusion above). No native value setter
+        // applies to a contenteditable -- select all of its existing content
+        // (a Range, not Selection.selectAllChildren, because
+        // Range.selectNodeContents is well-defined even when el has zero
+        // child nodes, e.g. an empty chat box) then let execCommand replace
+        // the selection and insert msg.text in one call. This fires the
+        // browser's native beforeinput/input events with
+        // inputType:'insertText', which is what framework-bound
+        // contenteditable widgets (Angular's ContentEditable directive, etc.)
+        // actually listen for -- a synthetic `new Event('input')` carries no
+        // inputType and would not match a beforeinput-gated handler.
+        // execCommand is deprecated web-platform-wide but remains fully
+        // functional in Firefox for exactly this (unformatted text insertion
+        // into a contenteditable) -- this project targets Firefox only, so
+        // no fallback is needed. Its boolean return value is checked (not
+        // assumed) since it can report failure without throwing.
+        const selection = window.getSelection();
+        // Gecko returns null for window.getSelection() on a document with no
+        // rendering (e.g. a display:none iframe) -- content scripts do run in
+        // such frames, and type's omitted-frameId fallback search can reach
+        // one. Guard against that instead of letting removeAllRanges() throw
+        // on null and surface as an unhandled rejection.
+        if (!selection) {
+          return Promise.resolve({ ok: false, error: 'contenteditable_insert_failed' });
+        }
+        // This tool drives a live, already-in-use browser -- the user may
+        // have a genuine text selection elsewhere on the page at the moment
+        // this runs. Capture it before clobbering it for the insert, and
+        // restore it afterward (success or failure) rather than leaving the
+        // user's selection collapsed into whatever this call just typed.
+        const savedRanges = [];
+        for (let i = 0; i < selection.rangeCount; i++) {
+          savedRanges.push(selection.getRangeAt(i));
+        }
         const range = document.createRange();
         range.selectNodeContents(el);
-        const selection = window.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
         const inserted = document.execCommand('insertText', false, msg.text);
+        selection.removeAllRanges();
+        for (const savedRange of savedRanges) {
+          selection.addRange(savedRange);
+        }
         if (!inserted) {
           return Promise.resolve({ ok: false, error: 'contenteditable_insert_failed' });
         }
@@ -427,8 +464,15 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       // both blow past MAX_ELEMENTS instantly and return mostly noise
       // (click/type only ever target things a user could actually interact
       // with).
+      // The contenteditable clauses use Firefox's case-insensitive attribute
+      // selector flag (" i") because HTML's contenteditable attribute value
+      // is not case-sensitive -- contenteditable="TRUE" reports
+      // el.isContentEditable === true just like "true" does, but without " i"
+      // it would silently fail to match here (invisible to list_elements,
+      // the exact bug this feature exists to fix). The empty-string clause
+      // doesn't need " i" -- there's no case variation of an empty string.
       const CANDIDATE_SELECTOR =
-        'a, button, input, select, textarea, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"], summary, tr, th, [contenteditable="true"], [contenteditable="plaintext-only"], [contenteditable=""]';
+        'a, button, input, select, textarea, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"], summary, tr, th, [contenteditable="true" i], [contenteditable="plaintext-only" i], [contenteditable=""]';
       // Caps the response well under the 1 MiB native-messaging frame limit
       // even on a link-heavy page; excess candidates are dropped, not
       // paginated -- MVP scope, revisit if this proves too small in practice.
