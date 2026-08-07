@@ -440,14 +440,12 @@ live-tested.
 toggling "Run in Private Windows" off/on in `about:addons` makes Firefox
 reload the extension, which spawns a fresh `native-host` singleton process
 and orphans any already-connected `firefox-bridge` (main `mcp-server`)
-session's persistent socket — that session's calls then hang until
-`request_timeout` rather than failing fast, and recovery requires
-restarting the MCP client. `firefox-bridge-bot` was unaffected by the same
-event, since it opens a fresh connection per script execution rather than
-holding one open for the process lifetime — this turned out to be an
-incidental resilience benefit of that design choice. Pre-existing
-characteristic of `mcp-server`'s persistent-connection architecture, not
-introduced by this batch; out of scope to fix here.
+session's persistent socket. **Fixed same day, see "Bridge auto-reconnect
+(bridge-client.js)" below** — `firefox-bridge`'s `mcp-server` now
+auto-reconnects instead of hanging until `request_timeout`.
+`firefox-bridge-bot` was never affected by this in the first place, since
+it opens a fresh connection per script execution rather than holding one
+open for the process lifetime.
 
 Not manually verified, documented as a known gap: the best-effort cleanup
 sweep's own failure mode (native-host process dying mid-script, or the
@@ -457,3 +455,33 @@ limitation, not engineered around. Similarly, `open_private_window` can in
 rare cases create a window and then fail with a `conflict` error without
 ever returning a `tabId` — an edge case the cleanup sweep structurally
 cannot see or close, since it never learns that tab's id.
+
+### Bridge auto-reconnect (bridge-client.js)
+
+- [x] With `firefox-bridge` connected and a tool call working, fully quit
+      Firefox, relaunch it, and — **without running `/mcp`** — call any
+      `firefox-bridge` tool (e.g. `list_tabs`) again. Confirm it just
+      succeeds on its own within a few seconds, instead of requiring a
+      manual `/mcp` reconnect — verified 2026-08-07 (full Firefox
+      quit+relaunch, `list_tabs` succeeded on the very next call with no
+      `/mcp`)
+- [ ] Reload only the extension (`about:debugging` → Reload, or toggle "Run
+      in Private Windows" in `about:addons`) without quitting Firefox
+      itself, then call a tool without `/mcp` — confirm the same
+      auto-recovery (this is the original live-testing finding that
+      prompted the fix; the full-quit scenario above exercises the same
+      code path but wasn't the literal originally-reported trigger)
+- [ ] Call a tool during the reconnect window itself (i.e. immediately
+      after killing Firefox, before it's relaunched) — confirm it returns
+      `{ok:false, error:'bridge_disconnected'}` rather than hanging or
+      throwing a raw stream error
+- [ ] With Firefox left closed for longer than a few retry cycles, confirm
+      (via `mcp-server`'s stderr) the reconnect backoff actually grows
+      (500ms → 1s → 2s → ... capped at 5s) rather than retrying at a flat
+      interval — this exercises the fix for the auth-failure/backoff race
+      use-codex's review caught; not exercised by the quick-relaunch test
+      above since that reconnects on the first or second attempt
+- [ ] Confirm `mcp-server` still exits cleanly (no hung reconnect timers
+      keeping the process alive) when Claude Code disconnects it normally
+      — this exercises the `close()` fix (previously `close()` triggered
+      an unwanted reconnect loop instead of actually shutting down)
