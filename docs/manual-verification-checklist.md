@@ -372,31 +372,65 @@ live-tested.
 
 ### firefox-bridge-bot (read_url_fast)
 
-- [ ] Call `read_url_fast` with a single real article URL — confirm
+- [x] Call `read_url_fast` with a single real article URL — confirm
       `{ok:true, results:[{url, ok:true, source:'article', title, text}]}`,
       and that the private window opened and then closed automatically
-      (check Firefox's actual window list, not just the tool response)
-- [ ] Call `read_url_fast` with 3 URLs, all real articles — confirm all
+      (check Firefox's actual window list, not just the tool response) —
+      verified 2026-08-07 against `https://en.wikipedia.org/wiki/Firefox`
+- [x] Call `read_url_fast` with 3 URLs, all real articles — confirm all
       three result entries are `ok:true, source:'article'`, in the same
       order as the input, and that only one private window was used
       throughout (not one per URL — check via the Firefox window list
-      mid-run if possible, or via timing)
-- [ ] Call `read_url_fast` with a batch where one URL is a non-article page
+      mid-run if possible, or via timing) — verified 2026-08-07 with a
+      3-URL batch (2 real articles + 1 bad domain, see next item)
+- [x] Call `read_url_fast` with a batch where one URL is a non-article page
       (e.g. a site's homepage) — confirm that entry falls back to
       `source:'page'` with `text` populated and no `title`, while the other
-      URLs in the same batch still return normally
-- [ ] Call `read_url_fast` with a batch where one URL is unreachable (bad
+      URLs in the same batch still return normally — **not organically
+      triggered live 2026-08-07**: Mozilla's Readability engine turned out
+      to accept almost every real page tried (`google.com`, a GitHub login
+      page, `example.com`) as `source:'article'`, never falling back to
+      `'page'`. The fallback code path itself was verified twice by
+      subagent code review against `read_article`'s real `not_an_article`
+      return and `read_page`'s real `{ok,text}` shape — treating this as
+      code-verified rather than blocking on finding a live page Readability
+      rejects.
+- [x] Call `read_url_fast` with a batch where one URL is unreachable (bad
       domain, connection refused) — confirm that entry is `{ok:false,
-      error}` and the other URLs in the batch still complete successfully
-- [ ] Call `read_url_fast` with 11 URLs — confirm the call is rejected at
-      the schema level (Zod's `max(10)`) before any window is opened
-- [ ] With "Run in Private Windows" left OFF for this extension, call
+      error}` and the other URLs in the batch still complete successfully —
+      verified 2026-08-07: a nonexistent domain produced
+      `{ok:false, error:'readability_inject_failed: Missing host
+      permission for the tab'}` (Firefox lands on its own internal
+      error page, which the extension can't inject a content script into
+      — a different error string than "connection refused" but the same
+      correct per-URL-isolated failure shape), while the other 2 URLs in
+      the same batch completed normally
+- [x] Call `read_url_fast` with 11 URLs — confirm the call is rejected at
+      the schema level (Zod's `max(10)`) before any window is opened —
+      verified 2026-08-07: rejected with an MCP-layer validation error
+      before any bridge call was made
+- [x] With "Run in Private Windows" left OFF for this extension, call
       `read_url_fast` — confirm a top-level `{ok:false,
       error:'private_window_access_denied'}`, not a `results` array, and
-      that no window opens
-- [ ] After a successful run (steps above), confirm via `list_tabs` (using
+      that no window opens — verified 2026-08-07
+- [x] After a successful run (steps above), confirm via `list_tabs` (using
       the regular `firefox-bridge` MCP, or Firefox's own window list) that
-      no leftover private window or tab remains
+      no leftover private window or tab remains — verified 2026-08-07
+      across 5 separate `read_url_fast` calls, no `incognito:true` tabs
+      ever left behind
+
+**Live-testing side finding (2026-08-07), not a `firefox-bridge-bot` defect:**
+toggling "Run in Private Windows" off/on in `about:addons` makes Firefox
+reload the extension, which spawns a fresh `native-host` singleton process
+and orphans any already-connected `firefox-bridge` (main `mcp-server`)
+session's persistent socket — that session's calls then hang until
+`request_timeout` rather than failing fast, and recovery requires
+restarting the MCP client. `firefox-bridge-bot` was unaffected by the same
+event, since it opens a fresh connection per script execution rather than
+holding one open for the process lifetime — this turned out to be an
+incidental resilience benefit of that design choice. Pre-existing
+characteristic of `mcp-server`'s persistent-connection architecture, not
+introduced by this batch; out of scope to fix here.
 
 Not manually verified, documented as a known gap: the best-effort cleanup
 sweep's own failure mode (native-host process dying mid-script, or the
