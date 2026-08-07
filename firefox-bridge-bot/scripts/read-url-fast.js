@@ -17,7 +17,10 @@ export default {
     'per-URL failure inside `results`). A successful result entry may also ' +
     'carry `truncated: true` (content was cut at ~500,000 chars) and/or ' +
     "`urlPending: true` (the tab's navigation hadn't been confirmed committed " +
-    'when it was read, so the content may be stale or incomplete).',
+    'when it was read, so the content may be stale or incomplete). Every ' +
+    'response (success or failure) also carries `startedAt`/`finishedAt` ' +
+    '(ISO timestamps) and `durationMs`, covering the full call from connect ' +
+    'through cleanup.',
   inputSchema: { urls: z.array(z.string().url()).min(1).max(10) },
 
   async run({ urls }, bridge) {

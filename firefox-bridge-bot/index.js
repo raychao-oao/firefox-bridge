@@ -51,9 +51,18 @@ async function main() {
       script.name,
       { description: script.description, inputSchema: script.inputSchema },
       async (input) => {
+        // Measured across the WHOLE call -- connect, script execution, and
+        // cleanup -- since that's the latency the caller actually
+        // experiences waiting on this tool. Results are assembled into
+        // `result` rather than returned directly from each branch, so a
+        // single return point at the end can stamp startedAt/finishedAt/
+        // durationMs onto every outcome (success, topLevelError, or thrown
+        // exception) after cleanup has actually finished running.
+        const startedAt = Date.now();
+
         // `bridge` starts undefined and is only assigned once connectBridge()
         // resolves -- if THAT itself fails (bad token, socket refused, auth
-        // rejected), the outer catch below must still turn it into the
+        // rejected), the catch below must still turn it into the
         // top-level {ok:false, error} contract instead of rejecting the MCP
         // callback directly. The `finally` guards on `bridge` being set,
         // since there is nothing to clean up if connectBridge() never
@@ -61,15 +70,16 @@ async function main() {
         // called connectBridge() before the try, so a connect/auth failure
         // bypassed this contract entirely.)
         let bridge;
+        let result;
         try {
           bridge = await connectBridge();
           const outcome = await script.run(input, bridge);
-          if (outcome && 'topLevelError' in outcome) {
-            return toolResult({ ok: false, error: outcome.topLevelError });
-          }
-          return toolResult({ ...outcome, ok: true });
+          result =
+            outcome && 'topLevelError' in outcome
+              ? { ok: false, error: outcome.topLevelError }
+              : { ...outcome, ok: true };
         } catch (err) {
-          return toolResult({ ok: false, error: `script_failed: ${err.message}` });
+          result = { ok: false, error: `script_failed: ${err.message}` };
         } finally {
           // Best-effort cleanup sweep, then disconnect -- runs whether the
           // script succeeded, returned a topLevelError, or threw. Skipped
@@ -79,6 +89,14 @@ async function main() {
             bridge.disconnect();
           }
         }
+
+        const finishedAt = Date.now();
+        return toolResult({
+          ...result,
+          startedAt: new Date(startedAt).toISOString(),
+          finishedAt: new Date(finishedAt).toISOString(),
+          durationMs: finishedAt - startedAt,
+        });
       }
     );
   }
