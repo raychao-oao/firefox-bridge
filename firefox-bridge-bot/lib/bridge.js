@@ -128,7 +128,18 @@ export async function connectBridge({ socketDir = bridgeDir() } = {}) {
   async function action(type, params) {
     const result = await call({ type, ...params });
     if (result.ok && TAB_OPENING_ACTIONS.has(type) && typeof result.tabId === 'number') {
-      openedTabIds.add(result.tabId);
+      // acquire_tab can either open a NEW tab (params.url) or lease an
+      // EXISTING one (params.tabId) -- per mcp-server/src/tools.js's own
+      // docs: "Pass a `url` to open a new tab, or a `tabId` to lease an
+      // existing one." Only track it for cleanup when this call actually
+      // created something; leasing a pre-existing tab must never make it
+      // into closeAllOpenedTabs()'s sweep, or cleanup could close one of
+      // the user's real, already-open tabs. open_private_window has no
+      // existing-tab-lease mode -- it always creates something new, so it
+      // keeps tracking unconditionally.
+      if (type !== 'acquire_tab' || params.tabId == null) {
+        openedTabIds.add(result.tabId);
+      }
     }
     return result;
   }
