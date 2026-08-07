@@ -402,4 +402,7 @@ Not manually verified, documented as a known gap: the best-effort cleanup
 sweep's own failure mode (native-host process dying mid-script, or the
 cleanup sweep's own `closeTab` calls failing) is not exercisable without
 deliberately killing the host process mid-run — accepted as a known
-limitation, not engineered around.
+limitation, not engineered around. Similarly, `open_private_window` can in
+rare cases create a window and then fail with a `conflict` error without
+ever returning a `tabId` — an edge case the cleanup sweep structurally
+cannot see or close, since it never learns that tab's id.

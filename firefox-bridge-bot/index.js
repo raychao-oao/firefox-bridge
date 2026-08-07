@@ -25,7 +25,20 @@ async function loadScripts() {
   const scripts = [];
   for (const file of files) {
     const mod = await import(pathToFileURL(path.join(SCRIPTS_DIR, file)).href);
-    scripts.push(mod.default);
+    const script = mod.default;
+    // Guard against a malformed script silently reaching registerTool() and
+    // crashing later with a confusing error -- name the offending file up
+    // front instead.
+    if (
+      !script ||
+      typeof script.name !== 'string' ||
+      typeof script.run !== 'function'
+    ) {
+      throw new Error(
+        `firefox-bridge-bot/scripts/${file} does not export a valid script (expected default export with name/run)`
+      );
+    }
+    scripts.push(script);
   }
   return scripts;
 }
@@ -51,10 +64,10 @@ async function main() {
         try {
           bridge = await connectBridge();
           const outcome = await script.run(input, bridge);
-          if (outcome && outcome.topLevelError) {
+          if (outcome && 'topLevelError' in outcome) {
             return toolResult({ ok: false, error: outcome.topLevelError });
           }
-          return toolResult({ ok: true, ...outcome });
+          return toolResult({ ...outcome, ok: true });
         } catch (err) {
           return toolResult({ ok: false, error: `script_failed: ${err.message}` });
         } finally {

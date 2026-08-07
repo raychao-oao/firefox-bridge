@@ -137,7 +137,7 @@ export async function connectBridge({ socketDir = bridgeDir() } = {}) {
       // the user's real, already-open tabs. open_private_window has no
       // existing-tab-lease mode -- it always creates something new, so it
       // keeps tracking unconditionally.
-      if (type !== 'acquire_tab' || params.tabId == null) {
+      if (type !== 'acquire_tab' || params?.tabId == null) {
         openedTabIds.add(result.tabId);
       }
     }

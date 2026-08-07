@@ -101,6 +101,20 @@ claude mcp add firefox-bridge -s user -- node mcp-server/src/index.js
 `claude mcp list` — should show `firefox-bridge: ... - ✔ Connected` once the extension is
 loaded and the native host is running.
 
+### 4. firefox-bridge-bot MCP server (optional, separate registration)
+
+`firefox-bridge-bot` is a **second, independent** MCP server, not a feature of the main
+`firefox-bridge` server above. It runs fast, deterministic "combo scripts" over the same
+Firefox bridge — a script does a whole multi-step job (e.g. open a private window, visit
+several URLs, extract each page's content, close the window) in one tool call with no AI
+judgment mid-script, in contrast to `firefox-bridge`'s step-by-step tools, where the calling
+model decides what to do next after every step. It must be registered separately from
+`firefox-bridge` — both can be enabled at once, or just one:
+```
+claude mcp add firefox-bridge-bot -s user -- node firefox-bridge-bot/index.js
+```
+Currently ships one tool: `read_url_fast` — reads up to 10 URLs' content in a single call.
+
 ### Windows
 
 firefox-bridge supports Windows natively: Firefox and the native messaging host run on
