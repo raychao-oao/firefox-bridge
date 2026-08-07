@@ -485,3 +485,107 @@ cannot see or close, since it never learns that tab's id.
       keeping the process alive) when Claude Code disconnects it normally
       — this exercises the `close()` fix (previously `close()` triggered
       an unwanted reconnect loop instead of actually shutting down)
+
+### select_option (new <select> tool)
+
+**Fixture for the harder-to-reproduce cases** (duplicate exact text, disabled
+option/optgroup/fieldset, `<select multiple>`, `label` attribute differing
+from child text) -- paste this into a scratch `.html` file, open it in
+Firefox, and `acquire_tab`/`navigate` to it (`file://` URL):
+
+```html
+<!DOCTYPE html>
+<html><body>
+<select id="s1">
+  <option value="a">標準版</option>
+  <option value="b">標準版</option>
+  <option value="c">進階版</option>
+</select>
+
+<select id="s2" disabled>
+  <option value="x">Only Option</option>
+</select>
+
+<fieldset disabled>
+  <select id="s3"><option value="y">In Disabled Fieldset</option></select>
+</fieldset>
+
+<select id="s4">
+  <option value="1">Enabled Option</option>
+  <optgroup label="Disabled Group" disabled>
+    <option value="2">Grouped Option</option>
+  </optgroup>
+</select>
+
+<select id="s5" multiple>
+  <option value="m1">Multi A</option>
+  <option value="m2" selected>Multi B</option>
+</select>
+
+<select id="s6">
+  <option value="lbl" label="畫面顯示名稱">內部 fallback 文字</option>
+</select>
+
+<select id="s7" onchange="document.getElementById('s7-out').textContent = 'changed: ' + this.value">
+  <option value="p1">Product One</option>
+  <option value="p2">Product Two</option>
+</select>
+<span id="s7-out"></span>
+</body></html>
+```
+
+- [ ] On coolpc.com.tw's estimate page (`https://www.coolpc.com.tw/evaluate.php`),
+      use `list_elements` on the CPU `<select>` to read its exact option
+      text, then call `select_option` with that exact text — confirm
+      `{ok:true, changed:true}` and that the page's own price recalculation
+      fires (visibly updates), which `click` alone could never trigger on
+      this element
+- [ ] On the same coolpc.com.tw select, call `select_option` again with a
+      short substring of a DIFFERENT option's text — confirm it resolves via
+      the substring tier and selects the right option
+- [ ] Fixture `#s1`: call `select_option` with text `"標準版"` (matches two
+      options exactly) — confirm `{ok:false, error:'ambiguous_match'}` with
+      both options listed in `matches`, NOT a silent pick of one
+- [ ] Fixture `#s1`: call `select_option` with text `"版"` (a substring of
+      all three options) — confirm the same `ambiguous_match` behavior at
+      the substring tier
+- [ ] Fixture `#s1`: call `select_option` with text `"進階版"` (an exact
+      match for one option, but also happens to be a substring-tier
+      candidate alongside the others) — confirm it selects `"進階版"`
+      directly via the exact tier and does NOT report `ambiguous_match`
+- [ ] Fixture `#s7`: call `select_option` twice in a row with the same
+      `text` — confirm the second call returns `{ok:true, changed:false}`
+      and `#s7-out`'s text does NOT update a second time (the page's
+      `onchange` did not re-fire)
+- [ ] Fixture `#s2`: call `select_option` targeting `#s2` — confirm
+      `{ok:false, error:'select_disabled'}`
+- [ ] Fixture `#s3`: call `select_option` targeting `#s3` (disabled via its
+      ancestor `<fieldset disabled>`, not its own `disabled` attribute) —
+      confirm `{ok:false, error:'select_disabled'}`
+- [ ] Fixture `#s4`: call `select_option` targeting `#s4` with text
+      `"Grouped Option"` (disabled via its ancestor `<optgroup disabled>`,
+      not its own `disabled` attribute) — confirm
+      `{ok:false, error:'option_disabled'}`
+- [ ] Fixture `#s5`: call `select_option` targeting `#s5` — confirm
+      `{ok:false, error:'multiple_select_not_supported'}`, and that
+      `list_elements`'s reported `state.value` for `#s5` is unchanged
+      afterward (still reflects `"Multi B"` selected, not touched)
+- [ ] Call `select_option` with a syntactically invalid CSS selector (e.g.
+      `":::"`) — confirm `{ok:false, error:'invalid_selector'}`
+- [ ] Call `select_option` with a selector matching a real element that
+      isn't a `<select>` (e.g. `body`) — confirm
+      `{ok:false, error:'not_a_select'}`
+- [ ] Fixture `#s1`: call `select_option` with `text` that's empty or all
+      whitespace — confirm `{ok:false, error:'empty_text'}`
+- [ ] Fixture `#s6`: run `list_elements` on `#s6` and confirm the reported
+      option text is `"畫面顯示名稱"` (the `label` attribute), not
+      `"內部 fallback 文字"` (the child text) — then call `select_option`
+      with `text: "畫面顯示名稱"` and confirm it matches (i.e.
+      `list_elements` and `select_option` agree on what this option's text
+      is)
+- [ ] Fixture `#s7`, with an explicit `frameId: 0` passed — confirm
+      `select_option` still works identically to the omitted-`frameId` case
+- [ ] Any fixture select, with a deliberately stale `expectedDomEpoch`
+      (e.g. captured from a `list_elements` call, then reload the page, then
+      call `select_option` with that now-stale value) — confirm
+      `{ok:false, error:'stale_selector'}`

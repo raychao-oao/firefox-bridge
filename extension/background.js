@@ -309,6 +309,8 @@ async function handleNativeMessage(msg) {
         return respond(await forwardToContentScript(msg));
       case 'hover':
         return respond(await forwardToContentScript(msg));
+      case 'select_option':
+        return respond(await forwardToContentScript(msg));
       case 'wait_for':
         return respond(await handleWaitFor(msg));
       case 'list_frames':
@@ -1488,6 +1490,21 @@ async function forwardToContentScript(msg) {
     return searchFramesForResult(msg, (frameId) => sendToFrame(msg.tabId, frameId, msg));
   }
   if (msg.type === 'upload_file') {
+    if (msg.frameId != null) {
+      const gate = await privilegedGate(msg, { frameId: msg.frameId });
+      if (!gate.ok) return gate;
+      return sendToFrame(msg.tabId, msg.frameId, msg);
+    }
+    return searchFramesForResult(msg, (frameId) => sendToFrame(msg.tabId, frameId, msg));
+  }
+  if (msg.type === 'select_option') {
+    // Same frame-fallback shape as type/hover/upload_file: not_a_select,
+    // empty_text, multiple_select_not_supported, select_disabled,
+    // option_disabled, and ambiguous_match are all non-retryable in
+    // searchFramesForResult (they're not in its RETRYABLE_ERRORS set),
+    // consistent with how option_not_found already behaves for `type` --
+    // each one proves the selector resolved to something in that frame, so
+    // the search correctly stops there instead of trying other frames.
     if (msg.frameId != null) {
       const gate = await privilegedGate(msg, { frameId: msg.frameId });
       if (!gate.ok) return gate;
