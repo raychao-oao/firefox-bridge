@@ -369,3 +369,37 @@ live-tested.
 - [ ] `read_article` without `frameId` on a page with an iframe containing separate
       article-shaped content only reads the top frame (confirms the top-frame-only
       default, not an aggregate scan across frames)
+
+### firefox-bridge-bot (read_url_fast)
+
+- [ ] Call `read_url_fast` with a single real article URL — confirm
+      `{ok:true, results:[{url, ok:true, source:'article', title, text}]}`,
+      and that the private window opened and then closed automatically
+      (check Firefox's actual window list, not just the tool response)
+- [ ] Call `read_url_fast` with 3 URLs, all real articles — confirm all
+      three result entries are `ok:true, source:'article'`, in the same
+      order as the input, and that only one private window was used
+      throughout (not one per URL — check via the Firefox window list
+      mid-run if possible, or via timing)
+- [ ] Call `read_url_fast` with a batch where one URL is a non-article page
+      (e.g. a site's homepage) — confirm that entry falls back to
+      `source:'page'` with `text` populated and no `title`, while the other
+      URLs in the same batch still return normally
+- [ ] Call `read_url_fast` with a batch where one URL is unreachable (bad
+      domain, connection refused) — confirm that entry is `{ok:false,
+      error}` and the other URLs in the batch still complete successfully
+- [ ] Call `read_url_fast` with 11 URLs — confirm the call is rejected at
+      the schema level (Zod's `max(10)`) before any window is opened
+- [ ] With "Run in Private Windows" left OFF for this extension, call
+      `read_url_fast` — confirm a top-level `{ok:false,
+      error:'private_window_access_denied'}`, not a `results` array, and
+      that no window opens
+- [ ] After a successful run (steps above), confirm via `list_tabs` (using
+      the regular `firefox-bridge` MCP, or Firefox's own window list) that
+      no leftover private window or tab remains
+
+Not manually verified, documented as a known gap: the best-effort cleanup
+sweep's own failure mode (native-host process dying mid-script, or the
+cleanup sweep's own `closeTab` calls failing) is not exercisable without
+deliberately killing the host process mid-run — accepted as a known
+limitation, not engineered around.
