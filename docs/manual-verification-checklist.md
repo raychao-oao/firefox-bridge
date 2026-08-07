@@ -418,6 +418,23 @@ live-tested.
       no leftover private window or tab remains — verified 2026-08-07
       across 5 separate `read_url_fast` calls, no `incognito:true` tabs
       ever left behind
+- [ ] Call `read_url_fast` with 5 URLs and no `concurrency` param — confirm
+      `results` has 5 entries in the same order as the input `urls` array
+      (not completion order), and that (via Firefox's window list mid-run,
+      or timing vs. the fully-sequential baseline above) multiple tabs are
+      alive in the private window at once rather than one-at-a-time
+- [ ] Call `read_url_fast` with 5 URLs and `concurrency: 5` — confirm all 5
+      still complete correctly and results stay in input order
+- [ ] Call `read_url_fast` with `concurrency: 6` — confirm the call is
+      rejected at the schema level (Zod's `max(5)`) before any window opens
+- [ ] Call `read_url_fast` with a `concurrency: 2` batch of 3 URLs where one
+      URL in the first batch of 2 is unreachable — confirm the other URL in
+      that same batch still completes normally and the 3rd URL (2nd batch)
+      still runs after the first batch finishes
+- [ ] After a `concurrency > 1` run, confirm via `list_tabs` that no
+      leftover private window or tab remains (same check as the sequential
+      case, re-run because tab lifecycle changed from close-per-URL to
+      close-all-at-the-end)
 
 **Live-testing side finding (2026-08-07), not a `firefox-bridge-bot` defect:**
 toggling "Run in Private Windows" off/on in `about:addons` makes Firefox

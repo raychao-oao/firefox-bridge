@@ -4,13 +4,15 @@ import { z } from 'zod';
 export default {
   name: 'read_url_fast',
   description:
-    'Read up to 10 URLs fast: opens one private browsing window, visits each ' +
-    "URL in turn (reusing the same window), extracts each page's content via " +
-    "Firefox's Reader View engine (falling back to raw visible text for " +
-    'non-article pages), then closes the window automatically. Fully ' +
-    'rule-based -- no AI judgment happens mid-run. A single URL\'s failure ' +
-    "(unreachable, extraction failure) is recorded in that URL's own result " +
-    "slot and does not abort the rest of the batch. Requires the extension's " +
+    'Read up to 10 URLs fast: opens one private browsing window, visits ' +
+    "URLs in batches of `concurrency` (default 3, max 5) within that same " +
+    "window, extracts each page's content via Firefox's Reader View engine " +
+    '(falling back to raw visible text for non-article pages), then closes ' +
+    'the window automatically. Fully rule-based -- no AI judgment happens ' +
+    "mid-run. A single URL's failure (unreachable, extraction failure) is " +
+    "recorded in that URL's own result slot (at the same index as its " +
+    'position in the input `urls` array, regardless of completion order) ' +
+    "and does not abort the rest of the batch. Requires the extension's " +
     '"Run in Private Windows" toggle enabled in about:addons -- without it, ' +
     'this returns a top-level {ok:false, error:"private_window_access_denied"} ' +
     'before opening anything (this is a setup failure, distinct from a ' +
@@ -21,9 +23,12 @@ export default {
     'response (success or failure) also carries `startedAt`/`finishedAt` ' +
     '(ISO timestamps) and `durationMs`, covering the full call from connect ' +
     'through cleanup.',
-  inputSchema: { urls: z.array(z.string().url()).min(1).max(10) },
+  inputSchema: {
+    urls: z.array(z.string().url()).min(1).max(10),
+    concurrency: z.number().int().min(1).max(5).optional(),
+  },
 
-  async run({ urls }, bridge) {
+  async run({ urls, concurrency = 3 }, bridge) {
     // Opened BLANK (no `url`) deliberately -- open_private_window does not
     // wait for navigation to commit the way acquire_tab does (up to 3s), so
     // special-casing the first URL through openPrivateWindow({url}) let the
@@ -40,24 +45,24 @@ export default {
     }
 
     const { windowId } = opened;
-    const results = [];
-    // Starts as the window's blank initial tab -- it gets closed the first
-    // time a real tab opens, same close-after-read ordering as every other
-    // iteration below (acquire -> wait/read -> close the PREVIOUS tab ->
-    // advance previousTabId), so a tab is only ever closed after its own
-    // content has been captured.
-    let previousTabId = opened.tabId;
+    const results = new Array(urls.length);
+    // Every tab opened this run -- the initial blank one plus every URL tab
+    // -- is closed together at the very end, in one sweep. Concurrent tabs
+    // can't reuse the "close the previous tab once the next one is read"
+    // chaining the sequential version used, since multiple tabs are alive
+    // at once; keeping the blank tab alive the whole run instead of
+    // special-casing its closure keeps the window's tab count >=1 at all
+    // times with no extra bookkeeping.
+    const tabIdsToClose = [opened.tabId];
 
-    for (const url of urls) {
+    async function readUrl(url, index) {
       const acquired = await bridge.acquireTab({ url, windowId });
       if (!acquired.ok) {
-        // previousTabId deliberately NOT touched here -- the previously
-        // opened tab is still the most recent live one, nothing new
-        // exists yet to close it in favor of.
-        results.push({ url, ok: false, error: acquired.error });
-        continue;
+        results[index] = { url, ok: false, error: acquired.error };
+        return;
       }
       const tabId = acquired.tabId;
+      tabIdsToClose.push(tabId);
 
       // Non-fatal: a network-idle timeout does not abort this URL, the
       // script just proceeds to read whatever is there.
@@ -65,7 +70,7 @@ export default {
 
       const article = await bridge.readArticle(tabId, { frameId: 0 });
       if (article.ok) {
-        results.push({
+        results[index] = {
           url,
           ok: true,
           source: 'article',
@@ -74,11 +79,11 @@ export default {
           truncated: article.truncated,
           totalLength: article.totalLength,
           urlPending: acquired.urlPending,
-        });
+        };
       } else if (article.error === 'not_an_article') {
         const page = await bridge.readPage(tabId, { frameId: 0 });
         if (page.ok) {
-          results.push({
+          results[index] = {
             url,
             ok: true,
             source: 'page',
@@ -86,24 +91,28 @@ export default {
             truncated: page.truncated,
             totalLength: page.totalLength,
             urlPending: acquired.urlPending,
-          });
+          };
         } else {
-          results.push({ url, ok: false, error: page.error });
+          results[index] = { url, ok: false, error: page.error };
         }
       } else {
-        results.push({ url, ok: false, error: article.error });
+        results[index] = { url, ok: false, error: article.error };
       }
-
-      // Close the PREVIOUS tab only now that THIS tab's content has been
-      // fully captured, so the window always has >=1 tab alive and nothing
-      // is ever closed before its own read completes.
-      await bridge.closeTab(previousTabId);
-      previousTabId = tabId;
     }
 
-    // Close the last remaining tab -- this also closes the private window,
-    // since it's the window's last tab.
-    await bridge.closeTab(previousTabId);
+    // Batched concurrency, not a live work-stealing pool: batch N+1 doesn't
+    // start until every URL in batch N has finished. Simpler than a real
+    // pool (no extra queueing/slot-refill logic, no dependency), at the
+    // cost of a slow URL in a batch holding up already-finished siblings in
+    // the same batch. Acceptable at this concurrency ceiling (<=5).
+    for (let i = 0; i < urls.length; i += concurrency) {
+      const batch = urls.slice(i, i + concurrency).map((url, j) => readUrl(url, i + j));
+      await Promise.all(batch);
+    }
+
+    // Closing order doesn't matter -- whichever tab happens to close last
+    // takes the private window down with it.
+    await Promise.all(tabIdsToClose.map((tabId) => bridge.closeTab(tabId)));
 
     return { results };
   },
