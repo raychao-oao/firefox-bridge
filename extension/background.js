@@ -112,6 +112,105 @@ browser.storage.onChanged.addListener((changes, area) => {
 });
 loadBlacklist();
 
+// Dialog interception whitelist. `dialogServerInfo` is null until the
+// first `dialog_server_ready` push arrives from native-host (see the
+// handleNativeMessage case below) -- a hostname whitelisted before that
+// happens is queued in `pendingDialogHostnames` rather than registered
+// with a not-yet-known port/token.
+let dialogWhitelist = [];
+let dialogServerInfo = null; // { port, token } once known
+const registeredDialogHooks = new Map(); // hostname -> RegisteredContentScript
+const pendingDialogHostnames = new Set();
+
+async function registerDialogHook(hostname) {
+  if (!dialogServerInfo) {
+    pendingDialogHostnames.add(hostname);
+    return;
+  }
+  const code = buildDialogHookSource(dialogServerInfo);
+  const registered = await browser.contentScripts.register({
+    matches: [`*://${hostname}/*`, `*://*.${hostname}/*`],
+    js: [{ code }],
+    runAt: 'document_start',
+    // MAIN world runs in the page's own JS execution context, not the
+    // isolated content-script world -- required so the window.alert/
+    // confirm/prompt overrides are visible to the page's own calling code.
+    world: 'MAIN',
+  });
+  registeredDialogHooks.set(hostname, registered);
+}
+
+async function unregisterDialogHook(hostname) {
+  const registered = registeredDialogHooks.get(hostname);
+  if (registered) {
+    await registered.unregister();
+    registeredDialogHooks.delete(hostname);
+  }
+  pendingDialogHostnames.delete(hostname);
+}
+
+async function loadDialogWhitelist() {
+  const stored = await browser.storage.local.get('dialogWhitelist');
+  dialogWhitelist = stored.dialogWhitelist || [];
+  for (const hostname of dialogWhitelist) {
+    await registerDialogHook(hostname);
+  }
+}
+
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.dialogWhitelist) return;
+  const oldSet = new Set(changes.dialogWhitelist.oldValue || []);
+  const newSet = new Set(changes.dialogWhitelist.newValue || []);
+  dialogWhitelist = [...newSet];
+  for (const hostname of newSet) {
+    if (!oldSet.has(hostname)) registerDialogHook(hostname);
+  }
+  for (const hostname of oldSet) {
+    if (!newSet.has(hostname)) unregisterDialogHook(hostname);
+  }
+});
+loadDialogWhitelist();
+
+// Re-registers every currently-registered/pending hostname against a fresh
+// dialogServerInfo. Called once, the first time dialog_server_ready
+// arrives (draining pendingDialogHostnames), and again on every SUBSEQUENT
+// dialog_server_ready (a native-host restart/reconnect) -- an
+// already-registered hook has the STALE port/token baked into its
+// injected closure and must be torn down and re-registered, not just have
+// dialogServerInfo updated in place (that alone wouldn't touch scripts
+// already handed to contentScripts.register()).
+async function onDialogServerReady() {
+  const stalePending = [...pendingDialogHostnames];
+  pendingDialogHostnames.clear();
+  const alreadyRegistered = [...registeredDialogHooks.keys()];
+  for (const hostname of alreadyRegistered) {
+    await unregisterDialogHook(hostname);
+  }
+  for (const hostname of new Set([...stalePending, ...alreadyRegistered])) {
+    await registerDialogHook(hostname);
+  }
+}
+
+async function handleAddDialogWhitelist(msg) {
+  const hostname = normalizeDialogHostname(msg.hostname);
+  if (!hostname) return { ok: false, error: 'invalid_hostname' };
+  const stored = await browser.storage.local.get('dialogWhitelist');
+  const current = stored.dialogWhitelist || [];
+  if (!current.includes(hostname)) {
+    await browser.storage.local.set({ dialogWhitelist: [...current, hostname] });
+  }
+  return { ok: true, hostname };
+}
+
+async function handleRemoveDialogWhitelist(msg) {
+  const hostname = normalizeDialogHostname(msg.hostname);
+  if (!hostname) return { ok: false, error: 'invalid_hostname' };
+  const stored = await browser.storage.local.get('dialogWhitelist');
+  const current = stored.dialogWhitelist || [];
+  await browser.storage.local.set({ dialogWhitelist: current.filter((h) => h !== hostname) });
+  return { ok: true, hostname };
+}
+
 // Central policy gate — every privileged operation must go through this
 // before touching scripting.executeScript / tabs.captureTab / DOM reads /
 // webRequest subscriptions. See spec section "特權操作的中央 Policy Gate".
@@ -259,6 +358,15 @@ async function handleNativeMessage(msg) {
       case 'session_end':
         // Host-initiated notification, not a request: no response expected.
         return onSessionEnded(msg.sessionId);
+      case 'dialog_server_ready':
+        // Host-initiated push (like session_end above), not a request: no
+        // response expected.
+        dialogServerInfo = { port: msg.port, token: msg.token };
+        return onDialogServerReady();
+      case 'add_dialog_whitelist':
+        return respond(await handleAddDialogWhitelist(msg));
+      case 'remove_dialog_whitelist':
+        return respond(await handleRemoveDialogWhitelist(msg));
       case 'acquire_tab':
         return respond(await handleAcquireTab(msg));
       case 'open_private_window':
