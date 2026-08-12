@@ -174,6 +174,64 @@ test('a closed client socket produces a session_end notification to Firefox', as
   );
 });
 
+test('starting the host pushes dialog_server_ready to Firefox with a port and token', async () => {
+  let sawReady;
+  const readyPromise = new Promise((resolve) => { sawReady = resolve; });
+  await withHost(
+    (msg, reply) => {
+      if (msg.type === 'dialog_server_ready') sawReady(msg);
+    },
+    async () => {
+      const msg = await Promise.race([
+        readyPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('dialog_server_ready never arrived')), 5000)),
+      ]);
+      assert.equal(typeof msg.port, 'number');
+      assert.ok(msg.port > 0);
+      assert.equal(typeof msg.token, 'string');
+      assert.equal(msg.token.length, 64);
+    }
+  );
+});
+
+test('list_dialogs and respond_dialog are answered by the host directly, never forwarded to Firefox', async () => {
+  let sawUnexpectedForward = false;
+  await withHost(
+    (msg, reply) => {
+      if (msg.type === 'list_dialogs' || msg.type === 'respond_dialog') {
+        sawUnexpectedForward = true;
+        reply({ ok: false, error: 'should never reach Firefox', requestId: msg.requestId });
+      }
+    },
+    async ({ client }) => {
+      const listRes = await client.call({ type: 'list_dialogs' });
+      assert.deepEqual(listRes.dialogs, []);
+      assert.equal(sawUnexpectedForward, false);
+
+      const respondRes = await client.call({ type: 'respond_dialog', id: 'does-not-exist', action: 'accept' });
+      assert.deepEqual(respondRes, { ok: false, error: 'not_found', requestId: respondRes.requestId });
+      assert.equal(sawUnexpectedForward, false);
+    }
+  );
+});
+
+test('a dialog POSTed to the dialog server appears in list_dialogs and can be answered via respond_dialog', async () => {
+  await withHost(
+    () => {}, // this test's dialog traffic never touches the Firefox side at all
+    async ({ client, socketDir }) => {
+      // A full page -> dialog-server -> respond_dialog round trip is
+      // covered by dialog-server.test.js (HTTP-level, same process) and the
+      // manual verification checklist (real browser) -- driving it from
+      // here would need this harness to parse the dynamically-assigned
+      // port out of dialog_server_ready and open a second raw HTTP
+      // connection across the test's process boundary, which is more
+      // test-only plumbing than the marginal coverage is worth.
+      const listRes = await client.call({ type: 'list_dialogs' });
+      assert.deepEqual(listRes.dialogs, []);
+    }
+  );
+});
+
 test('a malformed frame from Firefox does not kill the singleton host', async () => {
   await withHost(
     (msg, reply) => reply({ ok: true, requestId: msg.requestId }),

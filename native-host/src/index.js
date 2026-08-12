@@ -5,6 +5,7 @@ import { bridgeDir } from './bridge-dir.js';
 import { PayloadStore } from './payload-store.js';
 import { SessionManager } from './session-manager.js';
 import { SocketServer } from './socket-server.js';
+import { DialogServer } from './dialog-server.js';
 
 // A request forwarded to Firefox that never gets a reply (crashed background
 // page, dropped native port) must not hang the CLI forever or leak a `pending`
@@ -102,6 +103,9 @@ async function main() {
   const socketServer = new SocketServer({ socketDir: dir, sessionManager });
   await socketServer.start();
 
+  const dialogServer = new DialogServer();
+  const { port: dialogPort, token: dialogToken } = await dialogServer.start();
+
   // Pending requests sent to Firefox, keyed by requestId, so responses
   // (arriving async on stdin) can be routed back to the right socket client.
   // Value: { onReply(reply), settle(result), refresh() }.
@@ -155,6 +159,15 @@ async function main() {
     }
   }
 
+  // Host-initiated push, same pattern as the existing session_end push
+  // below -- not a reply to any Firefox request, no response expected.
+  sendToFirefox({
+    type: 'dialog_server_ready',
+    port: dialogPort,
+    token: dialogToken,
+    requestId: 'dialog-server-ready',
+  });
+
   // When a CLI's socket closes, its leases/grants/buffers live extension-side,
   // so the extension must be told explicitly — otherwise the dead session's
   // tabs stay leased (and thus permanently `conflict`) forever.
@@ -183,6 +196,16 @@ async function main() {
       } catch (err) {
         respond({ ok: false, error: err.message });
       }
+      return;
+    }
+
+    if (msg.type === 'list_dialogs') {
+      respond({ ok: true, dialogs: dialogServer.listPending() });
+      return;
+    }
+
+    if (msg.type === 'respond_dialog') {
+      respond(dialogServer.resolvePending(msg.id, msg.action, msg.text));
       return;
     }
 
@@ -237,6 +260,7 @@ async function main() {
     // below is slow, since process.exit() below will otherwise cut it off.
     cleanupLock();
     await socketServer.stop();
+    await dialogServer.stop();
     await payloadStore.invalidateAll();
     payloadOwners.clear();
     process.exit(0);
