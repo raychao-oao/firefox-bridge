@@ -27,7 +27,7 @@
     "<all_urls>"
   ],
   "background": {
-    "scripts": ["policy-gate.js", "bookmark-helpers.js", "dialog-whitelist.js", "background.js"],
+    "scripts": ["policy-gate.js", "bookmark-helpers.js", "dialog-whitelist.js", "dialog-hook.js", "background.js"],
     "persistent": true
   },
   "content_scripts": [
