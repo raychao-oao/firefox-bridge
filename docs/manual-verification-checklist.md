@@ -773,3 +773,44 @@ already connected.
     you see a CORS error here instead, dialog-hook.js's fallback will
     silently kick in on EVERY site, not just CSP-restricted ones — that's
     the load-bearing detail called out in this plan's Global Constraints.
+
+### XML/RSS fallback (read_page, read_article)
+
+- [ ] Navigate to `https://news.pts.org.tw/xml/newsfeed.xml` (公視新聞網,
+      RSS 2.0), call `read_page` — confirm `{ok:true, text: <non-empty feed
+      XML>, truncated:false, totalLength: <matches text.length>}`, not the
+      pre-fix `{ok:true, text:''}`
+- [ ] Same URL, call `read_article` — confirm the same non-empty `text`,
+      `truncated`, and `totalLength` as the previous step, `ok:true`, and no
+      `title`/`byline`/`siteName`/`excerpt` keys present in the response
+      object
+- [ ] Navigate to `https://github.com/anthropics/claude-code/releases.atom`
+      (Atom feed, `application/atom+xml`), call `read_page` — confirm
+      `{ok:true, text: <non-empty feed XML>, truncated:false, totalLength:
+      ...}`
+- [ ] Navigate to this literal data URL (RSS 1.0 / RDF synthetic fixture,
+      `application/rdf+xml`):
+      `data:application/rdf+xml,%3C%3Fxml%20version%3D%221.0%22%3F%3E%3Crdf%3ARDF%20xmlns%3Ardf%3D%22http%3A%2F%2Fwww.w3.org%2F1999%2F02%2F22-rdf-syntax-ns%23%22%3E%3C%2Frdf%3ARDF%3E`
+      (decodes to `<?xml version="1.0"?><rdf:RDF
+      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"></rdf:RDF>`),
+      call `read_page` — confirm `{ok:true, text: <contains "rdf:RDF">,
+      truncated:false, totalLength: ...}`
+- [ ] Navigate to `https://github.com/raychao-oao/firefox-bridge` (plain
+      HTML regression check), call `read_page` and `read_article` — confirm
+      **identical behavior to before this change** (the XML fallback does
+      not fire since `document.contentType` is `text/html`)
+- [ ] Navigate to this literal data URL (SVG regression check,
+      `image/svg+xml`, explicitly excluded from the allowlist):
+      `data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2210%22%20height%3D%2210%22%3E%3C%2Fsvg%3E`
+      (decodes to `<svg xmlns="http://www.w3.org/2000/svg" width="10"
+      height="10"></svg>`), call `read_page` — confirm the fallback does
+      NOT trigger, and (since an SVG document has no `<body>`) confirm
+      `{ok:true, text:'', truncated:false}` from the pre-existing
+      `document.body ? ... : ''` branch, unchanged from before this feature
+- [ ] **Code inspection only (not live — a >500,000-char live fixture isn't
+      practical to construct):** read `tryReadXmlFallback()`'s truncation
+      logic side-by-side with `read_page`'s existing truncation branch in
+      `repo/extension/content-script.js` and confirm the slicing math is
+      equivalent: `text.length > MAX_TEXT_CHARS` triggers `text.slice(0,
+      MAX_TEXT_CHARS)` with `truncated: true` and `totalLength: text.length`
+      (the pre-slice length)

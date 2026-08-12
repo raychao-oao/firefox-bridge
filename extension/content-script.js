@@ -93,6 +93,50 @@ if (window.__firefoxBridgeContentScriptInstalled) {
     if (event.persisted) domEpoch = fbGenerateId();
   });
 
+  // MAX_TEXT_CHARS -- read_page, read_article, and tryReadXmlFallback (below)
+  // all truncate at the same cap so a huge page/feed can't produce a
+  // response that blows past the 1 MiB native-messaging cap on the
+  // extension -> host hop.
+  const MAX_TEXT_CHARS = 500000;
+
+  const XML_CONTENT_TYPES = [
+    'application/xml',
+    'text/xml',
+    'application/rss+xml',
+    'application/atom+xml',
+    'application/rdf+xml',
+  ];
+
+  // Firefox renders XML/RSS/Atom/RDF documents with its own native
+  // pretty-print viewer -- that rendering isn't part of the page DOM this
+  // content script can read via document.body.innerText or Readability, so
+  // read_page/read_article silently returned empty text / not_an_article on
+  // feed URLs. The document itself IS fully parsed in memory though
+  // (document is a real XMLDocument) -- XMLSerializer reads that directly,
+  // synchronously, with no new network request. (An earlier design used
+  // fetch(location.href) instead; dropped because this extension is
+  // Manifest V2, where a content script's fetch() runs in the extension's
+  // request context, not the page's -- serializing the already-loaded
+  // document sidesteps that question entirely, and has no async window for
+  // a tab-navigates-away race either.)
+  function tryReadXmlFallback() {
+    if (!XML_CONTENT_TYPES.includes(document.contentType)) return null;
+    let text;
+    try {
+      text = new XMLSerializer().serializeToString(document);
+    } catch (err) {
+      return null;
+    }
+    const totalLength = text.length;
+    const truncated = totalLength > MAX_TEXT_CHARS;
+    return {
+      ok: true,
+      text: truncated ? text.slice(0, MAX_TEXT_CHARS) : text,
+      truncated,
+      totalLength,
+    };
+  }
+
   browser.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
     if (msg.type === 'click') {
       if (msg.expectedDomEpoch !== undefined && msg.expectedDomEpoch !== domEpoch) {
@@ -416,9 +460,10 @@ if (window.__firefoxBridgeContentScriptInstalled) {
     }
 
     if (msg.type === 'read_page') {
+      const xmlResult = tryReadXmlFallback();
+      if (xmlResult) return Promise.resolve(xmlResult);
       // Truncated so a huge page can't produce a response that blows past the
       // 1 MiB native-messaging cap on the extension -> host hop.
-      const MAX_TEXT_CHARS = 500000;
       const full = document.body ? document.body.innerText : '';
       if (full.length > MAX_TEXT_CHARS) {
         return Promise.resolve({
@@ -432,10 +477,11 @@ if (window.__firefoxBridgeContentScriptInstalled) {
     }
 
     if (msg.type === 'read_article') {
+      const xmlResult = tryReadXmlFallback();
+      if (xmlResult) return Promise.resolve(xmlResult);
       if (typeof Readability === 'undefined') {
         return Promise.resolve({ ok: false, error: 'readability_unavailable' });
       }
-      const MAX_TEXT_CHARS = 500000; // same cap read_page uses
       let article;
       try {
         article = new Readability(document.cloneNode(true), { maxElemsToParse: 100000 }).parse();
