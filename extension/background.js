@@ -122,6 +122,43 @@ let dialogServerInfo = null; // { port, token } once known
 const registeredDialogHooks = new Map(); // hostname -> RegisteredContentScript
 const pendingDialogHostnames = new Set();
 
+// All dialog-hook lifecycle operations (single-hostname register/unregister
+// calls from the storage.onChanged listener below, and the batch
+// teardown-and-re-register in onDialogServerReady) are serialized through
+// this one promise chain. Two problems this closes:
+//
+// 1. registerDialogHook() only inserts into registeredDialogHooks AFTER
+//    browser.contentScripts.register() resolves. Without serialization, an
+//    in-flight registerDialogHook() call is invisible to a concurrent
+//    onDialogServerReady() teardown snapshot -- the snapshot would miss it,
+//    then the in-flight call would resolve afterward and insert a hook
+//    built from a now-stale dialogServerInfo, permanently pinned until the
+//    whitelist changes again for that hostname. Routing both through the
+//    same queue guarantees that by the time onDialogServerReady's snapshot
+//    runs, every previously-queued register/unregister has already
+//    completed and is reflected in registeredDialogHooks/
+//    pendingDialogHostnames.
+// 2. enqueueDialogLifecycle() below always catches its operation's
+//    rejection internally, so the chain itself never rejects. That means
+//    one hostname's registration failure (e.g. normalizeDialogHostname
+//    returning an IPv6 literal like `::1`, producing an invalid match
+//    pattern `*://[::1]/*` that Firefox rejects) only logs and degrades
+//    that hostname -- it never aborts a loop's remaining iterations, and
+//    it's never an unhandled promise rejection from a fire-and-forget call
+//    (e.g. from the storage.onChanged listener, which can't await).
+let dialogLifecycleQueue = Promise.resolve();
+function enqueueDialogLifecycle(fn, hostname) {
+  const next = dialogLifecycleQueue.then(async () => {
+    try {
+      await fn();
+    } catch (err) {
+      console.error('dialog hook lifecycle operation failed for', hostname, err);
+    }
+  });
+  dialogLifecycleQueue = next;
+  return next;
+}
+
 async function registerDialogHook(hostname) {
   if (!dialogServerInfo) {
     pendingDialogHostnames.add(hostname);
@@ -153,7 +190,7 @@ async function loadDialogWhitelist() {
   const stored = await browser.storage.local.get('dialogWhitelist');
   dialogWhitelist = stored.dialogWhitelist || [];
   for (const hostname of dialogWhitelist) {
-    await registerDialogHook(hostname);
+    await enqueueDialogLifecycle(() => registerDialogHook(hostname), hostname);
   }
 }
 
@@ -163,10 +200,10 @@ browser.storage.onChanged.addListener((changes, area) => {
   const newSet = new Set(changes.dialogWhitelist.newValue || []);
   dialogWhitelist = [...newSet];
   for (const hostname of newSet) {
-    if (!oldSet.has(hostname)) registerDialogHook(hostname);
+    if (!oldSet.has(hostname)) enqueueDialogLifecycle(() => registerDialogHook(hostname), hostname);
   }
   for (const hostname of oldSet) {
-    if (!newSet.has(hostname)) unregisterDialogHook(hostname);
+    if (!newSet.has(hostname)) enqueueDialogLifecycle(() => unregisterDialogHook(hostname), hostname);
   }
 });
 loadDialogWhitelist();
@@ -179,16 +216,33 @@ loadDialogWhitelist();
 // injected closure and must be torn down and re-registered, not just have
 // dialogServerInfo updated in place (that alone wouldn't touch scripts
 // already handed to contentScripts.register()).
+//
+// The whole snapshot-teardown-re-register sequence runs as a single
+// operation on dialogLifecycleQueue, so the snapshot it takes only ever
+// sees the fully-settled result of every previously-queued register/
+// unregister call (see the dialogLifecycleQueue comment above for why that
+// matters). Each individual unregister/register within the batch has its
+// own try/catch so one bad hostname doesn't stop the rest of the batch.
 async function onDialogServerReady() {
-  const stalePending = [...pendingDialogHostnames];
-  pendingDialogHostnames.clear();
-  const alreadyRegistered = [...registeredDialogHooks.keys()];
-  for (const hostname of alreadyRegistered) {
-    await unregisterDialogHook(hostname);
-  }
-  for (const hostname of new Set([...stalePending, ...alreadyRegistered])) {
-    await registerDialogHook(hostname);
-  }
+  await enqueueDialogLifecycle(async () => {
+    const stalePending = [...pendingDialogHostnames];
+    pendingDialogHostnames.clear();
+    const alreadyRegistered = [...registeredDialogHooks.keys()];
+    for (const hostname of alreadyRegistered) {
+      try {
+        await unregisterDialogHook(hostname);
+      } catch (err) {
+        console.error('dialog hook unregistration failed for', hostname, err);
+      }
+    }
+    for (const hostname of new Set([...stalePending, ...alreadyRegistered])) {
+      try {
+        await registerDialogHook(hostname);
+      } catch (err) {
+        console.error('dialog hook registration failed for', hostname, err);
+      }
+    }
+  }, 'onDialogServerReady-batch');
 }
 
 async function handleAddDialogWhitelist(msg) {
