@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "MCP Browser Bridge",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "Lets MCP-capable CLIs (Claude Code, Codex, etc.) operate your existing Firefox tabs.",
   "browser_specific_settings": {
     "gecko": {
