@@ -700,6 +700,12 @@ already connected.
 
 ### Dialog interception (list_dialogs, respond_dialog, dialog whitelist)
 
+0. Before trusting any result below: open `about:debugging` → "This Firefox" →
+   this extension → "Inspect" to open its background page console. Confirm
+   there is no `dialog hook lifecycle operation failed` (or similar) error
+   logged. `enqueueDialogLifecycle` swallows every hook-registration failure
+   into a silent `console.error`, so a broken registration would otherwise
+   look identical to the expected CSP-fallback case in steps 9/11 below.
 1. Add a test hostname to the whitelist via the options page. Load a page
    on that hostname with a button that calls `alert("test message")`.
    Click it (via the `click` tool). Call `list_dialogs` — confirm the

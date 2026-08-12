@@ -42,7 +42,14 @@ function buildDialogHookSource({ port, token }) {
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.setRequestHeader('X-Dialog-Token', TOKEN);
     xhr.send(JSON.stringify({
-      id: crypto.randomUUID(),
+      // crypto.randomUUID is restricted to secure contexts (https, or
+      // localhost/127.0.0.1) -- on a plain http:// origin that isn't
+      // localhost (e.g. an intranet host), it's undefined and calling it
+      // throws, which the caller's try/catch would silently swallow into
+      // the native-dialog fallback. This id only needs to be unique within
+      // one native-host process's in-memory pending Map, not
+      // cryptographically unguessable, so fall back to Date.now()+Math.random().
+      id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('d-' + Date.now() + '-' + Math.random().toString(36).slice(2)),
       url: location.href,
       type: type,
       message: message,

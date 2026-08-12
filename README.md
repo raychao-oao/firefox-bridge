@@ -46,7 +46,8 @@ you're already using, logged into whatever you're logged into.
 `scroll_to`, `press_key`, `hover`, `drag_and_drop`, `upload_file`, `start_console`/`get_console`, `start_network`/`get_network`,
 `acquire_tab`/`release_tab`, `open_private_window`, `close_tab`, `discard_tab`, `go_back`, `go_forward`, `list_tabs`,
 `search_history`, `add_bookmark`, `list_bookmarks`, `search_bookmarks`, `to_be_deleted`,
-`list_containers`, `create_container`, `wait_for`.
+`list_containers`, `create_container`, `wait_for`, `list_dialogs`, `respond_dialog`,
+`add_dialog_whitelist`, `remove_dialog_whitelist`.
 
 `list_elements` discovers real CSS selectors for interactive elements instead of guessing
 blindly — each one is guaranteed to match exactly the inspected element on a follow-up
@@ -263,6 +264,13 @@ manual checklist to run through after changes there.
   merely present-but-unreachable — so an absence of `incognito: true` entries doesn't mean
   no private tabs are open, and `acquire_tab`'s `windowId` can't target a private window
   either, reporting `window_not_found` rather than a private-specific error
+- `list_dialogs`/`respond_dialog` dialog state is shared across all connected MCP
+  sessions, not scoped per-session — `DialogServer` has no tab/session concept by design
+  (see the dialog-interception design spec's "Why no tabId" section), so a whitelisted
+  hostname's dialogs are visible/answerable by any connected session, not only the one
+  whose leased tab triggered the dialog. `add_dialog_whitelist` cross-checks the existing
+  navigation blacklist and refuses (`{ ok: false, error: 'blacklisted' }`) to whitelist a
+  hostname that's already blacklisted there
 - Console/network capture is top-frame only, not frame-aware
 - Text truncation is char-count-based, not byte-based (risk on CJK-heavy pages)
 - WebMCP integration deferred to a future version

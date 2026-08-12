@@ -7,9 +7,13 @@
 // here: browser.contentScripts.register()'s own `matches` pattern performs
 // that gating natively -- Firefox itself decides whether to inject the
 // dialog hook, not this file (see background.js's registerDialogHook).
-// What DOES need sharing is hostname normalization, so a hostname added
-// via the options page or via the add_dialog_whitelist MCP tool produces
-// the identical stored value either way.
+// What DOES need sharing is hostname normalization. In practice, though,
+// extension/options/options.js does NOT import this file -- it maintains
+// its own separate (but logic-identical) `normalizeHostname` copy for its
+// blacklist+whitelist UI. The consumers of THIS file's
+// normalizeDialogHostname are background.js's add_dialog_whitelist/
+// remove_dialog_whitelist handlers (the MCP-tool-driven path), which is
+// where sharing this implementation actually matters today.
 //
 // Loaded as a plain background-page global (manifest.json's
 // background.scripts, must be listed before background.js). Also

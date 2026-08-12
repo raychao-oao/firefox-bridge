@@ -164,6 +164,12 @@ async function registerDialogHook(hostname) {
     pendingDialogHostnames.add(hostname);
     return;
   }
+  // Guard against double-registration (e.g. a startup race re-queuing the
+  // same hostname): overwriting an existing entry here would leak the prior
+  // RegisteredContentScript handle -- its .unregister() would never be
+  // called, so the hook stays injected on this hostname even after a later
+  // removal.
+  if (registeredDialogHooks.has(hostname)) return;
   const code = buildDialogHookSource(dialogServerInfo);
   const registered = await browser.contentScripts.register({
     matches: [`*://${hostname}/*`, `*://*.${hostname}/*`],
@@ -248,6 +254,15 @@ async function onDialogServerReady() {
 async function handleAddDialogWhitelist(msg) {
   const hostname = normalizeDialogHostname(msg.hostname);
   if (!hostname) return { ok: false, error: 'invalid_hostname' };
+  // Cross-check against the pre-existing navigation blacklist (policyGate),
+  // a separate safety list from dialogWhitelist. Without this, an AI could
+  // whitelist dialogs for a hostname the user explicitly blacklisted from
+  // navigation, with no coordination between the two lists. isBlacklisted()
+  // expects a URL (it calls new URL(url).hostname internally), so synthesize
+  // one from the bare hostname rather than duplicating its suffix-match logic.
+  if (policyGate.isBlacklisted(`https://${hostname}`)) {
+    return { ok: false, error: 'blacklisted' };
+  }
   const stored = await browser.storage.local.get('dialogWhitelist');
   const current = stored.dialogWhitelist || [];
   if (!current.includes(hostname)) {

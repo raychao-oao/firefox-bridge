@@ -215,7 +215,7 @@ test('list_dialogs and respond_dialog are answered by the host directly, never f
   );
 });
 
-test('a dialog POSTed to the dialog server appears in list_dialogs and can be answered via respond_dialog', async () => {
+test('list_dialogs returns empty when no dialog is pending', async () => {
   await withHost(
     () => {}, // this test's dialog traffic never touches the Firefox side at all
     async ({ client, socketDir }) => {

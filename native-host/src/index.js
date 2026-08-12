@@ -199,6 +199,17 @@ async function main() {
       return;
     }
 
+    // Unlike `payload-read` above, these two branches do NOT check `session.id`
+    // against any ownership map before answering. This is intentional, not an
+    // oversight: `DialogServer` has no tab/session concept by design (see the
+    // design spec's "Why no tabId" section) — a dialog fired by a whitelisted
+    // hostname is tracked purely by its own `id`, with no notion of which MCP
+    // session's leased tab triggered it. The practical consequence is that
+    // dialog state is shared across ALL connected sessions: any session can
+    // `list_dialogs`/`respond_dialog` a dialog regardless of which session's
+    // tab it came from. This is a real asymmetry with `payload-read`'s
+    // per-session ownership gate above, accepted as a scope tradeoff rather
+    // than a bug.
     if (msg.type === 'list_dialogs') {
       respond({ ok: true, dialogs: dialogServer.listPending() });
       return;
