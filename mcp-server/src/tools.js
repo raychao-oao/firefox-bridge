@@ -565,6 +565,58 @@ export function registerTools(server, bridgeClient) {
       return toolResult(result);
     }
   );
+
+  server.registerTool(
+    'list_dialogs',
+    {
+      description:
+        "List all JS dialogs (alert/confirm/prompt) currently blocked and awaiting an answer, across every whitelisted page. Each entry: {id, url, type, message, defaultText, openedAt}. `type` is 'alert'|'confirm'|'prompt'. `url` is self-reported by the page (via location.href) for display purposes only -- it is NOT a trustworthy identifier and cannot disambiguate two tabs open on the identical URL; use `id` to resolve a specific one via `respond_dialog`, which always routes correctly regardless. A dialog only appears here if the page's synchronous request actually reached the local dialog server -- if the page's own CSP or Permissions-Policy blocked that request, the page instead shows a REAL native dialog that only a human can answer, and it never appears here at all. Requires the target hostname to already be on the dialog whitelist (`add_dialog_whitelist`) -- unwhitelisted pages never intercept their dialogs in the first place, and their alert/confirm/prompt calls behave exactly as if this feature didn't exist.",
+      inputSchema: {},
+    },
+    async () => {
+      const result = await bridgeClient.call({ type: 'list_dialogs' });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'respond_dialog',
+    {
+      description:
+        "Answer a pending dialog from `list_dialogs` by id. `action` is 'accept' or 'dismiss'. For type 'confirm': accept->true, dismiss->false (matching clicking OK vs Cancel). For type 'prompt': accept returns `text` if given, else the dialog's own `defaultText`; dismiss always returns null regardless of `text` (matching Cancel, which discards any typed input). For type 'alert': either action just unblocks the page (alert has no return value either way). Returns {ok:false, error:'not_found'} if `id` no longer matches a pending dialog -- already resolved, timed out after 30s with a safe default (confirm->false, prompt->null), or never existed.",
+      inputSchema: { id: z.string(), action: z.enum(['accept', 'dismiss']), text: z.string().optional() },
+    },
+    async ({ id, action, text }) => {
+      const result = await bridgeClient.call({ type: 'respond_dialog', id, action, text });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'add_dialog_whitelist',
+    {
+      description:
+        "Add a hostname to the dialog interception whitelist -- pages on this hostname (and its subdomains) will have their alert/confirm/prompt calls intercepted so this AI can see and answer them via list_dialogs/respond_dialog, instead of popping a real native dialog only a human can click. Only add hostnames you actually trust: the mechanism works by injecting an override into the page's own JavaScript execution context, and that page's own script can in principle read the internal auth token this feature uses to talk to its local helper server -- this is an accepted, documented tradeoff for hostnames the user explicitly opts in, not a bug. `hostname` is normalized the same way as the existing navigation blacklist (scheme/path stripped if present, e.g. \"https://example.com/\" and \"example.com\" both store as \"example.com\"). Already-loaded pages on this hostname are NOT retroactively hooked -- reload them (e.g. via `navigate` to the same URL) for interception to take effect.",
+      inputSchema: { hostname: z.string() },
+    },
+    async ({ hostname }) => {
+      const result = await bridgeClient.call({ type: 'add_dialog_whitelist', hostname });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'remove_dialog_whitelist',
+    {
+      description:
+        "Remove a hostname from the dialog interception whitelist. Already-loaded pages on this hostname keep their override installed until reloaded (removal only stops FUTURE page loads on this hostname from getting the hook) -- reload the page for its alert/confirm/prompt to go back to real native dialogs.",
+      inputSchema: { hostname: z.string() },
+    },
+    async ({ hostname }) => {
+      const result = await bridgeClient.call({ type: 'remove_dialog_whitelist', hostname });
+      return toolResult(result);
+    }
+  );
 }
 
 function toolResult(result) {
