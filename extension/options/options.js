@@ -60,3 +60,52 @@ document.getElementById('add-hostname').addEventListener('click', () => {
 });
 
 loadAndRender();
+
+async function loadAndRenderDialogWhitelist() {
+  const { dialogWhitelist = [] } = await browser.storage.local.get('dialogWhitelist');
+  const list = document.getElementById('dialog-whitelist-items');
+  list.innerHTML = '';
+  for (const hostname of dialogWhitelist) {
+    const li = document.createElement('li');
+    li.textContent = hostname + ' ';
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', () => removeDialogHostname(hostname));
+    li.appendChild(removeBtn);
+    list.appendChild(li);
+  }
+}
+
+async function addDialogHostname(hostname) {
+  const { dialogWhitelist = [] } = await browser.storage.local.get('dialogWhitelist');
+  if (!dialogWhitelist.includes(hostname)) {
+    await browser.storage.local.set({ dialogWhitelist: [...dialogWhitelist, hostname] });
+  }
+  await loadAndRenderDialogWhitelist();
+}
+
+async function removeDialogHostname(hostname) {
+  const { dialogWhitelist = [] } = await browser.storage.local.get('dialogWhitelist');
+  await browser.storage.local.set({ dialogWhitelist: dialogWhitelist.filter((h) => h !== hostname) });
+  await loadAndRenderDialogWhitelist();
+}
+
+document.getElementById('add-dialog-hostname').addEventListener('click', () => {
+  const input = document.getElementById('new-dialog-hostname');
+  const errorEl = document.getElementById('dialog-hostname-error');
+  const value = input.value.trim();
+  if (!value) return;
+
+  const hostname = normalizeHostname(value);
+  if (!hostname) {
+    errorEl.textContent = `"${value}" doesn't look like a valid hostname.`;
+    errorEl.style.display = '';
+    return;
+  }
+
+  errorEl.style.display = 'none';
+  addDialogHostname(hostname);
+  input.value = '';
+});
+
+loadAndRenderDialogWhitelist();

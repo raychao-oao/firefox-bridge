@@ -12,6 +12,13 @@
   <button id="add-hostname">Add</button>
   <p id="hostname-error" style="color: #b00; display: none;"></p>
 
+  <h2>Dialog Whitelist</h2>
+  <p>Hostnames where Claude/Codex/agy can see and answer alert/confirm/prompt dialogs, instead of them popping as regular browser dialogs only a human can click. Only add hostnames you trust.</p>
+  <ul id="dialog-whitelist-items"></ul>
+  <input type="text" id="new-dialog-hostname" placeholder="example.com">
+  <button id="add-dialog-hostname">Add</button>
+  <p id="dialog-hostname-error" style="color: #b00; display: none;"></p>
+
   <script src="options.js"></script>
 </body>
 </html>
