@@ -697,3 +697,73 @@ already connected.
       chat input appears with `state.contentEditable: true`, call `type`
       against it with a short test message, and confirm the message text
       visibly appears in the chat input before sending
+
+### Dialog interception (list_dialogs, respond_dialog, dialog whitelist)
+
+1. Add a test hostname to the whitelist via the options page. Load a page
+   on that hostname with a button that calls `alert("test message")`.
+   Click it (via the `click` tool). Call `list_dialogs` — confirm the
+   pending entry shows the right `type`/`message`. Call `respond_dialog`
+   with `accept` — confirm the page's script resumes after the `alert()`
+   call (e.g. a `console.log` right after it fires, visible via
+   `get_console`).
+2. Same page, a button calling `confirm("delete this?")`. `respond_dialog`
+   with `action: "accept"` — confirm the page's `if (confirm(...))` branch
+   that only runs on `true` actually executed (e.g. check page state via
+   `read_page` or `get_console`).
+3. Same, but `respond_dialog` with `action: "dismiss"` — confirm the
+   `false` branch ran instead.
+4. A button calling `prompt("your name?", "default")`. `respond_dialog`
+   with `action: "accept", text: "Ray"` — confirm the page received exactly
+   `"Ray"` (not the `defaultText`).
+5. Same, `action: "accept"` with no `text` — confirm the page received the
+   dialog's own `defaultText` ("default").
+6. Same, `action: "dismiss"` — confirm the page received `null`, not an
+   empty string.
+7. Don't call `respond_dialog` at all; wait 30+ seconds; confirm the page
+   resumed on its own with the safe default, and a subsequent
+   `respond_dialog` on that (now-expired) id returns `not_found`.
+8. Add a hostname to the whitelist, then remove it via
+   `remove_dialog_whitelist`. Reload the page. Trigger `alert()` again —
+   confirm it's a real, native, blocking browser dialog this time (not
+   intercepted), proving the override was actually unregistered, not just
+   ignored.
+9. On a page NOT on the whitelist, trigger `alert()`/`confirm()` — confirm
+   native dialog behavior is completely unchanged (this is the
+   opt-in-only guarantee; also confirms `handleClick`'s existing
+   timeout-based `dialogOpened` heuristic still fires correctly for
+   non-whitelisted pages, since nothing about that code path changes).
+10. Trigger two dialogs back-to-back (e.g. a button that calls `alert()`
+    twice in a row synchronously) on a whitelisted page — confirm both
+    appear in `list_dialogs` with distinct ids, and both can be
+    independently resolved via separate `respond_dialog` calls.
+11. Add a page served with a strict `Content-Security-Policy: connect-src
+    'none'` header (or any header that excludes `http://127.0.0.1:*`) to
+    the whitelist. Trigger `confirm()` — confirm a real native, blocking
+    browser dialog appears (not a silent `false`), and that clicking it
+    (a human click, since this dialog cannot be answered via
+    `respond_dialog`) produces the expected return value in the page.
+    Confirm the dialog never appears in `list_dialogs` (the request never
+    reached `dialog-server.js`). Note how long the fallback took to
+    appear — this is the live check for whether a CSP-blocked synchronous
+    XHR fails fast (expected) or hangs first (would need follow-up work if
+    observed).
+12. Open two separate tabs on the same whitelisted hostname. Trigger
+    `confirm()` on both. Confirm `list_dialogs` shows two distinct pending
+    entries with distinct `url`s (or distinct ids if both tabs are on the
+    exact same URL) — this is the live check that one hostname-level
+    `contentScripts.register()` call really does cover multiple
+    simultaneous tabs. Resolve them independently via `respond_dialog` and
+    confirm each tab's page receives its own intended answer, not the
+    other tab's.
+13. (New, not in the design spec — a CORS-specific check discovered while
+    writing this plan.) Before step 1 above ever passes, confirm the CORS
+    preflight actually works end-to-end in a real browser, not just via
+    `dialog-server.test.js`'s raw Node http client (which doesn't enforce
+    CORS the way a browser does): open the whitelisted page's DevTools
+    Network tab while triggering a dialog, and confirm you see BOTH an
+    `OPTIONS` request to `127.0.0.1:<port>/dialog` (status 204) and the
+    subsequent `POST` (status 200), with no CORS error in the console. If
+    you see a CORS error here instead, dialog-hook.js's fallback will
+    silently kick in on EVERY site, not just CSP-restricted ones — that's
+    the load-bearing detail called out in this plan's Global Constraints.
