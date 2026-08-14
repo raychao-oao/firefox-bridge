@@ -47,11 +47,25 @@ you're already using, logged into whatever you're logged into.
 `acquire_tab`/`release_tab`, `open_private_window`, `close_tab`, `discard_tab`, `go_back`, `go_forward`, `list_tabs`,
 `search_history`, `add_bookmark`, `list_bookmarks`, `search_bookmarks`, `to_be_deleted`,
 `list_containers`, `create_container`, `wait_for`, `list_dialogs`, `respond_dialog`,
-`add_dialog_whitelist`, `remove_dialog_whitelist`.
+`add_dialog_whitelist`, `remove_dialog_whitelist`, `request_tab_selection`, `get_tab_selection`.
 
 `list_elements` discovers real CSS selectors for interactive elements instead of guessing
 blindly — each one is guaranteed to match exactly the inspected element on a follow-up
 `click`/`type`.
+
+`list_tabs` also returns each tab's `index` (0-based position in its own window's tab
+order) and `active` (true for the one active tab per window), plus a top-level
+`focusedWindowId` (`null` whenever Firefox itself lacks OS focus) — enough to identify
+"the tab the user is currently looking at" without asking. When that still isn't enough to
+tell two candidate tabs apart (e.g. the same URL open twice in the same window and
+container), call `request_tab_selection` with a `reason`; it returns immediately with a
+`requestId` and shows a pending-count badge on the toolbar button. The user right-clicks
+whichever tab they mean and picks it from the "Firefox Bridge" submenu in Firefox's tab
+context menu (one row per pending request, labelled with its `reason`). Poll
+`get_tab_selection(requestId)` for the result — `resolved` (with the chosen `tabId`),
+`timedOut` (after 120s), or `uiUnavailable` (the menu itself failed to render); a terminal
+status is delivered at most once. The toolbar button and badge only ever show a pending
+count — they aren't clickable to resolve a request.
 
 `click` returns an effect summary (`navigated`, `dialogOpened`, `domChanged`, `newUrl`) so
 an agent can tell what happened without a separate `read_page` round-trip. `ok: true` only
@@ -274,6 +288,8 @@ manual checklist to run through after changes there.
 - Console/network capture is top-frame only, not frame-aware
 - Text truncation is char-count-based, not byte-based (risk on CJK-heavy pages)
 - WebMCP integration deferred to a future version
+- The toolbar button added for `request_tab_selection` uses Firefox's generic
+  puzzle-piece icon — no dedicated icon asset was designed for this feature
 
 ## License
 
