@@ -116,6 +116,27 @@ claude mcp add firefox-bridge -s user -- node mcp-server/src/index.js
 `claude mcp list` — should show `firefox-bridge: ... - ✔ Connected` once the extension is
 loaded and the native host is running.
 
+**Codex CLI:**
+```
+codex mcp add firefox-bridge -- node /absolute/path/to/firefox-bridge/repo/mcp-server/src/index.js
+```
+
+**agy (Antigravity CLI), macOS/Linux:** no `mcp add` subcommand exists — edit
+`~/.gemini/config/mcp_config.json` directly:
+```json
+{
+  "mcpServers": {
+    "firefox-bridge": {
+      "command": "node",
+      "args": ["/absolute/path/to/firefox-bridge/repo/mcp-server/src/index.js"]
+    }
+  }
+}
+```
+
+Replace `/absolute/path/to/firefox-bridge/repo` with this repo's actual location on your
+machine (run `pwd` from inside `repo/` to get it) in all three examples above.
+
 ### 4. firefox-bridge-bot MCP server (optional, separate registration)
 
 `firefox-bridge-bot` is a **second, independent** MCP server, not a feature of the main
@@ -133,6 +154,12 @@ machine (run `pwd` from inside `repo/` to get it). Unlike some other `claude mcp
 invocations, a relative path here gets stored verbatim rather than resolved automatically —
 if the MCP server ever fails to start, an unresolved relative path is the first thing to
 check.
+
+Same pattern for Codex CLI (`codex mcp add firefox-bridge-bot -- node
+/absolute/path/to/firefox-bridge/repo/firefox-bridge-bot/index.js`) and agy on macOS/Linux
+(add a second entry alongside `firefox-bridge` in `~/.gemini/config/mcp_config.json`'s
+`mcpServers`, pointing `args` at
+`/absolute/path/to/firefox-bridge/repo/firefox-bridge-bot/index.js` instead).
 
 Currently ships one tool: `read_url_fast` — reads up to 10 URLs' content in a single call.
 
