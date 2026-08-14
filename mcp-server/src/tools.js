@@ -426,6 +426,32 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'request_tab_selection',
+    {
+      description:
+        "Ask the user to manually pick a specific Firefox tab, for when list_tabs's index/active/cookieStoreId/windowId fields aren't enough to disambiguate 2+ candidate tabs (e.g. the same URL open in 2+ tabs, same container, same window). Returns immediately with { ok: true, requestId } -- it does NOT wait for the user. Right after this call, right-clicking any tab in Firefox's tab strip shows a \"Firefox Bridge\" submenu with one row per pending request, labelled by that request's `reason`. Poll with get_tab_selection(requestId) to find out once the user has picked one. `reason` is required -- with 2+ requests pending (e.g. a concurrent CLI session also has one open), the row label is the only way the user can tell which request is which, so make it specific to what you're about to do.",
+      inputSchema: { reason: z.string() },
+    },
+    async ({ reason }) => {
+      const result = await bridgeClient.call({ type: 'request_tab_selection', reason });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'get_tab_selection',
+    {
+      description:
+        "Poll for the result of a pending request_tab_selection call. Returns { ok: true, status: 'pending' } if the user hasn't picked a tab yet -- call again later. Returns { ok: true, status: 'resolved', tabId } once they have (only then is `tabId` present). Returns { ok: true, status: 'timedOut' } if 120 seconds passed with no pick, or { ok: true, status: 'uiUnavailable' } if the selection UI itself failed to render. A terminal status (anything other than 'pending') is delivered at most once -- calling again with the same requestId after that returns { ok: false, error: 'unknown_request' }, same as passing an unrecognized requestId or one that belongs to a different session.",
+      inputSchema: { requestId: z.string() },
+    },
+    async ({ requestId }) => {
+      const result = await bridgeClient.call({ type: 'get_tab_selection', selectionRequestId: requestId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'list_containers',
     {
       description:
