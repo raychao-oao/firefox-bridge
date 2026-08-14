@@ -416,11 +416,37 @@ export function registerTools(server, bridgeClient) {
     'list_tabs',
     {
       description:
-        'List all open Firefox tabs (id, url, title, cookieStoreId, discarded, lastAccessed, incognito, windowId) and which are currently leased. `cookieStoreId` identifies which Multi-Account Container (if any) the tab belongs to -- see `list_containers`. `discarded` is true if Firefox has already unloaded the tab from memory. `lastAccessed` is a millisecond epoch timestamp of when the tab was last focused. `incognito` is true if the tab belongs to a private browsing window -- private tabs appear in this list only if the user has enabled "Run in Private Windows" for this extension in about:addons; without it they are omitted from list_tabs entirely (not merely unreachable), so an absence of incognito: true entries does not mean no private tabs are open. `windowId` identifies which browser window the tab belongs to -- pass it to acquire_tab\'s `windowId` parameter to open a new tab inside that same window instead of whatever window Firefox considers "current".',
+        'List all open Firefox tabs (id, url, title, cookieStoreId, discarded, lastAccessed, incognito, windowId, index, active) and which are currently leased, plus a top-level `focusedWindowId`. `cookieStoreId` identifies which Multi-Account Container (if any) the tab belongs to -- see `list_containers`. `discarded` is true if Firefox has already unloaded the tab from memory. `lastAccessed` is a millisecond epoch timestamp of when the tab was last focused. `incognito` is true if the tab belongs to a private browsing window -- private tabs appear in this list only if the user has enabled "Run in Private Windows" for this extension in about:addons; without it they are omitted from list_tabs entirely (not merely unreachable), so an absence of incognito: true entries does not mean no private tabs are open. `windowId` identifies which browser window the tab belongs to -- pass it to acquire_tab\'s `windowId` parameter to open a new tab inside that same window instead of whatever window Firefox considers "current". `index` is the tab\'s 0-based position within its OWN window\'s tab order -- useful for describing a tab by position ("the 3rd GitHub tab") but NOT a guaranteed visual left-to-right count (Firefox vertical tabs, hidden tabs) and NOT a stable identifier across calls, always re-read it fresh. `active` is true only for the one currently-active tab in its own window (every open window has exactly one -- `active` alone never identifies a single tab across multiple windows). Combine `active`, `windowId`, and the response\'s top-level `focusedWindowId` to find "the tab the user is currently looking at": the tab where `windowId === focusedWindowId && active === true` -- well-defined (exactly one match) only when `focusedWindowId` is non-null; it is `null` whenever Firefox itself does not currently have OS focus (e.g. the user is in another application), meaning no tab should be treated as the one they\'re looking at. If duplicate/ambiguous tabs of the same site can\'t be resolved from these fields, use `request_tab_selection`.',
       inputSchema: {},
     },
     async () => {
       const result = await bridgeClient.call({ type: 'list_tabs' });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'request_tab_selection',
+    {
+      description:
+        "Ask the user to manually pick a specific Firefox tab, for when list_tabs's index/active/cookieStoreId/windowId fields aren't enough to disambiguate 2+ candidate tabs (e.g. the same URL open in 2+ tabs, same container, same window). Returns immediately with { ok: true, requestId } -- it does NOT wait for the user. Right after this call, right-clicking any tab in Firefox's tab strip shows a \"Firefox Bridge\" submenu with one row per pending request, labelled by that request's `reason`. Poll with get_tab_selection(requestId) to find out once the user has picked one. `reason` is required -- with 2+ requests pending (e.g. a concurrent CLI session also has one open), the row label is the only way the user can tell which request is which, so make it specific to what you're about to do.",
+      inputSchema: { reason: z.string() },
+    },
+    async ({ reason }) => {
+      const result = await bridgeClient.call({ type: 'request_tab_selection', reason });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'get_tab_selection',
+    {
+      description:
+        "Poll for the result of a pending request_tab_selection call. Returns { ok: true, status: 'pending' } if the user hasn't picked a tab yet -- call again later. Returns { ok: true, status: 'resolved', tabId } once they have (only then is `tabId` present). Returns { ok: true, status: 'timedOut' } if 120 seconds passed with no pick, or { ok: true, status: 'uiUnavailable' } if the selection UI itself failed to render. A terminal status (anything other than 'pending') is delivered at most once -- calling again with the same requestId after that returns { ok: false, error: 'unknown_request' }, same as passing an unrecognized requestId or one that belongs to a different session.",
+      inputSchema: { requestId: z.string() },
+    },
+    async ({ requestId }) => {
+      const result = await bridgeClient.call({ type: 'get_tab_selection', selectionRequestId: requestId });
       return toolResult(result);
     }
   );
