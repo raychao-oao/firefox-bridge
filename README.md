@@ -136,6 +136,13 @@ check.
 
 Currently ships one tool: `read_url_fast` — reads up to 10 URLs' content in a single call.
 
+`scripts/` is extensible: any file exported with `{name, description, inputSchema, run}`
+is auto-registered as its own MCP tool at startup. The intended workflow is to prove a
+multi-step path works via live `firefox-bridge` interaction first, then encode that
+winning path as a script here so future runs skip the AI-judgment cost. Not every
+`firefox-bridge` action is wired into a script's `bridge` object yet — see the
+Known limitations section below.
+
 ### Windows
 
 firefox-bridge supports Windows natively: Firefox and the native messaging host run on
@@ -290,6 +297,12 @@ manual checklist to run through after changes there.
 - WebMCP integration deferred to a future version
 - The toolbar button added for `request_tab_selection` uses Firefox's generic
   puzzle-piece icon — no dedicated icon asset was designed for this feature
+- `firefox-bridge-bot`'s scripts don't have `screenshot` or `upload_file` available on
+  their `bridge` object yet, even though both exist on the main `firefox-bridge` server —
+  wiring them in is a `firefox-bridge-bot/lib/bridge.js` change, not just a new script
+- `firefox-bridge-bot` has no automated tests and no manual verification checklist file
+  (unlike the main extension's `docs/manual-verification-checklist.md`) — verifying a new
+  or changed script is currently ad hoc
 
 ## License
 
