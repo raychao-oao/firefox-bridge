@@ -24,8 +24,10 @@
     "scripting",
     "contextualIdentities",
     "cookies",
+    "menus",
     "<all_urls>"
   ],
+  "browser_action": {},
   "background": {
     "scripts": ["policy-gate.js", "bookmark-helpers.js", "dialog-whitelist.js", "dialog-hook.js", "background.js"],
     "persistent": true

@@ -78,6 +78,11 @@ function onNativePortLost() {
   sessionGrants = new Map();
   consoleBuffers.clear();
   networkBuffers.clear();
+  for (const [requestId, entry] of [...tabSelectionRequests]) {
+    if (entry.status === 'pending') {
+      transitionToTerminal(requestId, 'timedOut');
+    }
+  }
   console.log('firefox-bridge: logical session state cleared on port loss');
 }
 
@@ -90,6 +95,15 @@ function onSessionEnded(sessionId) {
   }
   onceGrants.delete(sessionId);
   sessionGrants.delete(sessionId);
+  // The caller is gone -- there's no dedicated "abandoned" status, since
+  // no one will ever poll for the distinction from 'timedOut'. Not
+  // awaited: cleanup here is best-effort UI housekeeping, matching this
+  // function's existing synchronous, fire-and-forget style.
+  for (const [requestId, entry] of [...tabSelectionRequests]) {
+    if (entry.sessionId === sessionId && entry.status === 'pending') {
+      transitionToTerminal(requestId, 'timedOut');
+    }
+  }
   console.log(`firefox-bridge: cleared state for ended session ${sessionId}`);
 }
 
@@ -417,6 +431,222 @@ async function privilegedGate(msg, { url, frameId = 0 } = {}) {
   return { ok: true };
 }
 
+// --- Tab selection (request_tab_selection / get_tab_selection) ---
+// See docs/superpowers/specs/2026-08-14-firefox-bridge-tab-disambiguation-design.md,
+// Mechanism 2. Polling, not a held-open native-messaging reply: every
+// round trip below is ordinary and fast, nothing waits on a human before
+// replying.
+
+const TAB_SELECTION_PARENT_MENU_ID = 'firefox-bridge-tab-selection';
+const TAB_SELECTION_DEADLINE_MS = 120_000;
+const TAB_SELECTION_RETENTION_MS = 10 * 60 * 1000;
+
+function tabSelectionChildMenuId(requestId) {
+  return `${TAB_SELECTION_PARENT_MENU_ID}:${requestId}`;
+}
+
+// 'pending' until the parent menu item's creation callback fires, then
+// 'ready' or 'failed'. request_tab_selection calls arriving during the
+// brief 'pending' window await tabSelectionMenuReady before proceeding;
+// 'failed' means no request_tab_selection can ever be fulfilled (the
+// toolbar button is status-only, not an alternate resolution path), so
+// every call short-circuits to selection_ui_unavailable immediately.
+let tabSelectionMenuState = 'pending';
+let resolveTabSelectionMenuReady;
+const tabSelectionMenuReady = new Promise((resolve) => {
+  resolveTabSelectionMenuReady = resolve;
+});
+
+browser.menus.create(
+  {
+    id: TAB_SELECTION_PARENT_MENU_ID,
+    title: 'Firefox Bridge',
+    contexts: ['tab'],
+    visible: false,
+  },
+  () => {
+    // browser.menus.create() is not Promise-rejecting for error reporting
+    // -- it returns the new item's ID synchronously, and creation
+    // failures surface only through this callback's browser.runtime.lastError.
+    if (browser.runtime.lastError) {
+      console.error('firefox-bridge: tab-selection parent menu failed to create', browser.runtime.lastError);
+      tabSelectionMenuState = 'failed';
+    } else {
+      tabSelectionMenuState = 'ready';
+    }
+    resolveTabSelectionMenuReady();
+  }
+);
+
+// requestId -> { requestId, sessionId, reason, status, tabId, createdAt,
+//                deadlineTimer, retentionTimer }
+// Named plainly (not "pending" + "TabSelectionRequests") -- it also holds
+// resolved/timedOut/uiUnavailable entries awaiting their one
+// get_tab_selection poll before removal. UI counts below MUST filter by
+// status; using the map's raw size directly is the bug a prior
+// spec-review round caught.
+const tabSelectionRequests = new Map();
+
+function tabSelectionPendingCount() {
+  let count = 0;
+  for (const entry of tabSelectionRequests.values()) {
+    if (entry.status === 'pending') count += 1;
+  }
+  return count;
+}
+
+// Each of these three WebExtension calls is independently best-effort --
+// one rejecting must not abort the others, and none of them should ever
+// surface as an unhandled rejection from a click/deadline/cleanup listener.
+async function refreshTabSelectionUI() {
+  const pendingCount = tabSelectionPendingCount();
+  try {
+    await browser.menus.update(TAB_SELECTION_PARENT_MENU_ID, { visible: pendingCount > 0 });
+  } catch (err) {
+    console.error('firefox-bridge: tab-selection menus.update failed', err);
+  }
+  try {
+    await browser.browserAction.setBadgeText({ text: pendingCount ? String(pendingCount) : '' });
+  } catch (err) {
+    console.error('firefox-bridge: tab-selection setBadgeText failed', err);
+  }
+  try {
+    // Firefox doesn't guarantee an ALREADY-OPEN context menu repaints just
+    // from menus.create/update/remove calls -- this is the documented way
+    // to push a pending structural change into a menu currently on screen.
+    await browser.menus.refresh();
+  } catch (err) {
+    console.error('firefox-bridge: tab-selection menus.refresh failed', err);
+  }
+}
+
+// The ONLY path any request leaves 'pending' through -- a click, the 120s
+// deadline, a child menu item failing to create, session end, or port
+// loss all call this. extra is merged onto the entry (e.g. { tabId } for
+// 'resolved').
+async function transitionToTerminal(requestId, status, extra) {
+  const entry = tabSelectionRequests.get(requestId);
+  // Settle-once guard: absent or already not 'pending' means another path
+  // already transitioned this request (e.g. a click and the deadline
+  // firing close together) -- no-op.
+  if (!entry || entry.status !== 'pending') return;
+
+  clearTimeout(entry.deadlineTimer);
+  entry.status = status;
+  if (extra) Object.assign(entry, extra);
+
+  // Started HERE, before the awaits below, not after both -- a
+  // get_tab_selection poll could otherwise consume and delete this entry
+  // during those awaits, leaving a dangling timer for the rest of the
+  // 10-minute window (harmless -- its callback below no-ops via the
+  // identity guard -- but pointless). Caught in review round 4.
+  entry.retentionTimer = setTimeout(() => {
+    if (tabSelectionRequests.get(requestId) === entry) {
+      tabSelectionRequests.delete(requestId);
+    }
+  }, TAB_SELECTION_RETENTION_MS);
+
+  try {
+    // Awaited BEFORE refreshTabSelectionUI(), not fire-and-forgotten, so
+    // its menus.refresh() call is guaranteed to run after this structural
+    // removal has actually completed, not racing it.
+    await browser.menus.remove(tabSelectionChildMenuId(requestId));
+  } catch (err) {
+    console.error('firefox-bridge: tab-selection menus.remove failed', err);
+  }
+  await refreshTabSelectionUI();
+}
+
+async function handleRequestTabSelection(msg) {
+  if (tabSelectionMenuState === 'pending') await tabSelectionMenuReady;
+  if (tabSelectionMenuState === 'failed') {
+    return { ok: false, error: 'selection_ui_unavailable' };
+  }
+
+  // This message's own transport requestId IS this selection request's ID
+  // -- there's nothing to send back yet on this first call, so no
+  // collision with BridgeClient.call()'s auto-generated requestId (that
+  // only bites get_tab_selection, which must send a PREVIOUSLY-obtained
+  // ID back as a payload field -- see handleGetTabSelection below).
+  const requestId = msg.requestId;
+  const entry = {
+    requestId,
+    sessionId: msg.sessionId,
+    reason: msg.reason,
+    status: 'pending',
+    tabId: null,
+    createdAt: Date.now(),
+    deadlineTimer: null,
+    retentionTimer: null,
+  };
+  entry.deadlineTimer = setTimeout(() => {
+    transitionToTerminal(requestId, 'timedOut');
+  }, TAB_SELECTION_DEADLINE_MS);
+  tabSelectionRequests.set(requestId, entry);
+
+  try {
+    await new Promise((resolve, reject) => {
+      browser.menus.create(
+        {
+          id: tabSelectionChildMenuId(requestId),
+          parentId: TAB_SELECTION_PARENT_MENU_ID,
+          title: entry.reason,
+          contexts: ['tab'],
+        },
+        () => {
+          if (browser.runtime.lastError) reject(new Error(browser.runtime.lastError.message));
+          else resolve();
+        }
+      );
+    });
+  } catch (err) {
+    console.error('firefox-bridge: tab-selection child menu failed to create', err);
+    await transitionToTerminal(requestId, 'uiUnavailable');
+    // Still return { ok: true, requestId } here, NOT an error -- the
+    // request was created successfully (it's in tabSelectionRequests with
+    // a real, pollable status), only its menu item failed. The caller
+    // finds out via a normal get_tab_selection poll returning
+    // { ok: true, status: 'uiUnavailable' }. Only a *parent* menu failure
+    // (tabSelectionMenuState === 'failed', checked at the top of this
+    // function) means no request could be created at all, which is the
+    // one case that short-circuits to { ok: false, error:
+    // 'selection_ui_unavailable' } without ever creating an entry.
+    return { ok: true, requestId };
+  }
+
+  await refreshTabSelectionUI();
+  return { ok: true, requestId };
+}
+
+function handleGetTabSelection(msg) {
+  const entry = tabSelectionRequests.get(msg.selectionRequestId);
+  // Not found, OR found but belongs to a different session: same error
+  // either way. Without the ownership check, a session that obtained
+  // another session's requestId could consume its terminal result first,
+  // leaving the real owner permanently stuck with unknown_request.
+  if (!entry || entry.sessionId !== msg.sessionId) {
+    return { ok: false, error: 'unknown_request' };
+  }
+  if (entry.status === 'pending') {
+    return { ok: true, status: 'pending' };
+  }
+  // Terminal status: consume it -- delivered at most once. A second poll
+  // for the same requestId after this hits the "not found" branch above.
+  clearTimeout(entry.retentionTimer);
+  tabSelectionRequests.delete(msg.selectionRequestId);
+  const result = { ok: true, status: entry.status };
+  if (entry.status === 'resolved') result.tabId = entry.tabId;
+  return result;
+}
+
+browser.menus.onClicked.addListener((info, tab) => {
+  if (typeof info.menuItemId !== 'string') return;
+  const prefix = `${TAB_SELECTION_PARENT_MENU_ID}:`;
+  if (!info.menuItemId.startsWith(prefix)) return;
+  const requestId = info.menuItemId.slice(prefix.length);
+  transitionToTerminal(requestId, 'resolved', { tabId: tab.id });
+});
+
 async function handleNativeMessage(msg) {
   const respond = (result) => {
     if (nativePort) nativePort.postMessage({ ...result, requestId: msg.requestId });
@@ -454,6 +684,10 @@ async function handleNativeMessage(msg) {
         return respond(await handleNavigate(msg));
       case 'list_tabs':
         return respond(await handleListTabs());
+      case 'request_tab_selection':
+        return respond(await handleRequestTabSelection(msg));
+      case 'get_tab_selection':
+        return respond(handleGetTabSelection(msg));
       case 'list_containers':
         return respond(await handleListContainers());
       case 'create_container':
