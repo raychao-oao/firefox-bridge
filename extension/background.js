@@ -939,8 +939,18 @@ async function handleCreateContainer(msg) {
 
 async function handleListTabs() {
   const tabs = await browser.tabs.query({});
+  // getLastFocused() returns the most-recently-focused window EVEN WHEN
+  // Firefox itself currently has no OS focus (e.g. the user alt-tabbed to
+  // a terminal) -- .focused is what actually says whether Firefox is the
+  // foreground application right now. Only report focusedWindowId when it
+  // is; otherwise no tab should be treated as "the one the user is
+  // looking at". See docs/superpowers/specs/2026-08-14-firefox-bridge-tab-disambiguation-design.md,
+  // Mechanism 1.
+  const lastFocused = await browser.windows.getLastFocused();
+  const focusedWindowId = lastFocused.focused ? lastFocused.id : null;
   return {
     ok: true,
+    focusedWindowId,
     tabs: tabs.map((t) => ({
       id: t.id,
       url: t.url,
@@ -951,6 +961,16 @@ async function handleListTabs() {
       lastAccessed: t.lastAccessed,
       incognito: t.incognito,
       windowId: t.windowId,
+      // Position within this tab's OWN window's tab order, 0-based. NOT a
+      // guaranteed visual left-to-right count (vertical-tabs layout,
+      // hidden tabs) and NOT a stable identifier -- callers must read it
+      // fresh every list_tabs call, never cache it.
+      index: t.index,
+      // Whether this is the active tab WITHIN ITS OWN WINDOW. Not
+      // globally unique -- every open window has exactly one. Combine
+      // with windowId === focusedWindowId to find "the tab the user is
+      // currently looking at".
+      active: t.active,
     })),
   };
 }
