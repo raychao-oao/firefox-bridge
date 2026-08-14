@@ -871,14 +871,14 @@ already connected.
 
 ### Tab disambiguation (list_tabs fields, request_tab_selection, get_tab_selection)
 
-- [ ] Open 2+ tabs, call `list_tabs`, confirm every tab has `index`
+- [x] Open 2+ tabs, call `list_tabs`, confirm every tab has `index`
       (matches its tab order within its window) and `active` (true only
       for the one currently-active tab per window), and the response has
       a top-level `focusedWindowId` matching whichever window is actually
       focused on screen -- then switch OS focus away from Firefox
       entirely (e.g. click into a terminal) and call `list_tabs` again,
       confirming `focusedWindowId` is `null`.
-- [ ] **Basic single-request resolution, badge clears on click not on
+- [x] **Basic single-request resolution, badge clears on click not on
       poll.** Open two tabs of the same URL in the same window and same
       container (the maximally-ambiguous case). Call
       `request_tab_selection` with a `reason`, confirm it returns
@@ -893,12 +893,12 @@ already connected.
       (cross-check against `list_tabs`). Call `get_tab_selection` again
       for the same `requestId` and confirm it now returns
       `{ ok: false, error: 'unknown_request' }`.
-- [ ] **Cross-window and cross-container duplicates.** Repeat the above
+- [x] **Cross-window and cross-container duplicates.** Repeat the above
       scenario but with the two duplicate tabs split across (a) two
       different windows, (b) two different Multi-Account Containers.
       Confirm selection still resolves to the exact tab right-clicked,
       not influenced by window/container.
-- [ ] **Two concurrent requests, resolved out of order, polled
+- [x] **Two concurrent requests, resolved out of order, polled
       independently.** Call `request_tab_selection` twice (different
       `reason`s), noting both `requestId`s. Confirm the badge shows `2`
       and the submenu shows two distinctly-labelled rows. Resolve the
@@ -907,17 +907,17 @@ already connected.
       still returns `pending`, and the first call's menu row is still
       present. Resolve it too and confirm both poll to `resolved` and the
       badge clears.
-- [ ] **Timeout path.** Call `request_tab_selection`, don't click
+- [x] **Timeout path.** Call `request_tab_selection`, don't click
       anything, wait past 120 seconds. Call `get_tab_selection` and
       confirm it returns `{ ok: true, status: 'timedOut' }`. Confirm the
       badge/submenu cleared back to empty state once the deadline fired
       (not only once polled).
-- [ ] **Polling before resolution.** Call `request_tab_selection`, then
+- [x] **Polling before resolution.** Call `request_tab_selection`, then
       `get_tab_selection` immediately (before clicking anything) and
       confirm it returns `{ ok: true, status: 'pending' }` without side
       effects (the menu item/badge are unaffected, a later poll still
       works normally).
-- [ ] **Cross-session ownership check.** From one CLI session, call
+- [x] **Cross-session ownership check.** From one CLI session, call
       `request_tab_selection` and note the returned `requestId`. From a
       *second*, independent CLI session (e.g. Codex if the rest of this
       checklist was run from Claude Code, or vice versa), call
@@ -927,7 +927,7 @@ already connected.
       just by having the ID. Then resolve it from the first session's
       tab-strip click and confirm the *first* session's own
       `get_tab_selection` still works normally.
-- [ ] **Session-end cleanup.** With a request still pending, kill that
+- [x] **Session-end cleanup.** With a request still pending, kill that
       session's `mcp-server` process (Ctrl-C) -- this is this project's
       existing precedent for triggering `session_end` in a live test, see
       the "Multi-session" section of this same file ("Kill session A's
