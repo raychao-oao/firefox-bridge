@@ -161,7 +161,12 @@ Same pattern for Codex CLI (`codex mcp add firefox-bridge-bot -- node
 `mcpServers`, pointing `args` at
 `/absolute/path/to/firefox-bridge/repo/firefox-bridge-bot/index.js` instead).
 
-Currently ships one tool: `read_url_fast` — reads up to 10 URLs' content in a single call.
+Currently ships three tools:
+- `read_url_fast` — reads up to 10 URLs' content in a single call.
+- `read_news` — finds news article links (by RSS feed, built-in source/category/keyword,
+  or a manual listing URL + regex pattern) and bulk-reads them in one call.
+- `get_weather` — queries CWA (中央氣象署) forecasts and active nationwide alerts for
+  any Taiwan county/city.
 
 `scripts/` is extensible: any file exported with `{name, description, inputSchema, run}`
 is auto-registered as its own MCP tool at startup. The intended workflow is to prove a
