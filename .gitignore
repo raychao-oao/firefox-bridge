@@ -6,3 +6,4 @@ dist/
 .env
 *.log
 extension/.amo-upload-uuid
+.worktrees/
