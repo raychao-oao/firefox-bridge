@@ -643,6 +643,63 @@ export function registerTools(server, bridgeClient) {
       return toolResult(result);
     }
   );
+
+  server.registerTool(
+    'add_webmcp_whitelist',
+    {
+      description:
+        "Add a hostname to the WebMCP shim whitelist -- pages on this hostname (and its subdomains) get a compatibility shim for the experimental WebMCP API (document.modelContext.registerTool), letting this AI discover (webmcp_list_tools) and call (webmcp_call_tool) tools the page itself registers. Independent of the dialog-interception whitelist (add_dialog_whitelist) -- whitelisting a hostname here does NOT also enable dialog interception, and vice versa; the two grant different capabilities. Only add hostnames you actually trust: any tool a page registers runs with that page's own permissions, and this AI will be able to call it. `hostname` is normalized the same way as the dialog whitelist (scheme/path stripped if present). Already-loaded pages on this hostname are NOT retroactively hooked -- reload them (e.g. via `navigate` to the same URL) for the shim to take effect.",
+      inputSchema: { hostname: z.string() },
+    },
+    async ({ hostname }) => {
+      const result = await bridgeClient.call({ type: 'add_webmcp_whitelist', hostname });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'remove_webmcp_whitelist',
+    {
+      description:
+        "Remove a hostname from the WebMCP shim whitelist. This revokes AI-callability IMMEDIATELY -- webmcp_list_tools/webmcp_call_tool re-check the whitelist on every call, so a still-open tab on this hostname is no longer listable or callable right away. What does NOT change immediately: an already-loaded page's shim script stays physically installed and keeps running until the page reloads or navigates away -- it just can no longer be discovered or called through this MCP server.",
+      inputSchema: { hostname: z.string() },
+    },
+    async ({ hostname }) => {
+      const result = await bridgeClient.call({ type: 'remove_webmcp_whitelist', hostname });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'webmcp_list_tools',
+    {
+      description:
+        "List the WebMCP tools a whitelisted page has registered on the given tab (via document.modelContext.registerTool). Returns {documentId, tools: [{name, title, description, inputSchema, annotations}, ...]} -- `tools` is empty and `documentId` is null if the page hasn't registered anything (not whitelisted, hasn't loaded yet, or registered nothing). Pass the returned `documentId` to webmcp_call_tool -- it identifies exactly which page load this tool list belongs to, so a call made after the page navigates away fails cleanly (`stale_registration`) instead of silently reaching the wrong document. Only top-level-frame registrations are seen -- tools registered from inside an iframe are not supported and never appear here.",
+      inputSchema: { tabId: z.number() },
+    },
+    async ({ tabId }) => {
+      const result = await bridgeClient.call({ type: 'webmcp_list_tools', tabId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
+    'webmcp_call_tool',
+    {
+      description:
+        "Call a WebMCP tool a whitelisted page has registered, by name (from webmcp_list_tools). Requires holding the tab's lease (acquire_tab) first, same as click/type/etc. -- fails with {ok:false, error:'conflict'} otherwise. `documentId` must be the value webmcp_list_tools most recently returned for this tab; a mismatch (e.g. the page navigated away since) returns {ok:false, error:'stale_registration'} rather than silently calling into whatever page is now loaded. The whitelist is re-checked live on every call, not just at registration time -- if the hostname was removed from the whitelist since the page registered, this returns {ok:false, error:'not_whitelisted'} even though the registration itself is still otherwise valid. Calls time out after 20 seconds ({ok:false, error:'tool_call_timeout'}) -- WebMCP tools are expected to be fast, read-only-ish operations, not long-running ones. A tool that throws returns {ok:false, error:'tool_execution_error: <message>'}.",
+      inputSchema: {
+        tabId: z.number(),
+        toolName: z.string(),
+        documentId: z.string(),
+        arguments: z.record(z.string(), z.unknown()).optional(),
+      },
+    },
+    async ({ tabId, toolName, documentId, arguments: args }) => {
+      const result = await bridgeClient.call({ type: 'webmcp_call_tool', tabId, toolName, documentId, arguments: args });
+      return toolResult(result);
+    }
+  );
 }
 
 function toolResult(result) {

@@ -47,7 +47,8 @@ you're already using, logged into whatever you're logged into.
 `acquire_tab`/`release_tab`, `open_private_window`, `close_tab`, `discard_tab`, `go_back`, `go_forward`, `list_tabs`,
 `search_history`, `add_bookmark`, `list_bookmarks`, `search_bookmarks`, `to_be_deleted`,
 `list_containers`, `create_container`, `wait_for`, `list_dialogs`, `respond_dialog`,
-`add_dialog_whitelist`, `remove_dialog_whitelist`, `request_tab_selection`, `get_tab_selection`.
+`add_dialog_whitelist`, `remove_dialog_whitelist`, `request_tab_selection`, `get_tab_selection`,
+`add_webmcp_whitelist`, `remove_webmcp_whitelist`, `webmcp_list_tools`, `webmcp_call_tool`.
 
 `list_elements` discovers real CSS selectors for interactive elements instead of guessing
 blindly — each one is guaranteed to match exactly the inspected element on a follow-up
@@ -72,6 +73,15 @@ an agent can tell what happened without a separate `read_page` round-trip. `ok: 
 means the click event was dispatched — it is not a guarantee that the effect you expected
 actually happened (e.g. a JS-initiated navigation may not be reflected in `navigated` yet;
 see `wait_for` for polling a page to a target state).
+
+`add_webmcp_whitelist`/`remove_webmcp_whitelist` opt a hostname in or out of a compatibility
+shim for the experimental [WebMCP](https://w3c-cg.github.io/aikr/webMCP/webmcp-technical-notes.html)
+API (`document.modelContext.registerTool`) — separate from the dialog-interception whitelist,
+whitelisting for one doesn't whitelist for the other. `webmcp_list_tools` discovers the tools a
+whitelisted page has registered on a given tab (returning a `documentId` plus each tool's
+name/schema); `webmcp_call_tool` invokes one by name, passing back the same `documentId` so a
+call made after the page navigates away fails cleanly instead of silently hitting the wrong
+document.
 
 ## Install
 
