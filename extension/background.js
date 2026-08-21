@@ -83,6 +83,16 @@ function onNativePortLost() {
       transitionToTerminal(requestId, 'timedOut');
     }
   }
+  // Reject all pending WebMCP calls -- no session can still be connected
+  // once the native-messaging port itself is gone. This does NOT touch
+  // webmcpToolRegistry: a page's registration is browser state, not
+  // MCP-session state, and there's no re-registration handshake to
+  // recover it after -- see the Map declaration comment above.
+  for (const [requestId, pending] of [...webmcpPendingCalls]) {
+    clearTimeout(pending.timer);
+    webmcpPendingCalls.delete(requestId);
+    pending.resolve({ ok: false, error: 'tool_call_timeout' });
+  }
   console.log('firefox-bridge: logical session state cleared on port loss');
 }
 
@@ -526,6 +536,29 @@ async function handleWebmcpCallTool(msg) {
 
   return resultPromise;
 }
+
+// Race this closes (found by the second use-codex review pass on this
+// feature's design spec, 2026-08-20): document_start injection of the
+// page-world shim and this onCommitted handler firing are NOT guaranteed
+// to happen in any particular order. If the new document's shim has
+// already registered (via webmcp-tool-register, Task 4) by the time this
+// fires, webmcpToolRegistry.get(tabId).documentId already equals
+// details.documentId -- clearing unconditionally would wipe out that
+// FRESH registration instead of a stale one. Comparing before clearing
+// closes the race: only clear when the stored documentId is something
+// OTHER than this commit's documentId (i.e. genuinely stale, from
+// whatever document was previously loaded in this tab).
+browser.webNavigation.onCommitted.addListener((details) => {
+  if (details.frameId !== 0) return; // top-level frame only, per scope decision
+  const entry = webmcpToolRegistry.get(details.tabId);
+  if (entry && entry.documentId !== details.documentId) {
+    webmcpToolRegistry.delete(details.tabId);
+  }
+});
+
+browser.tabs.onRemoved.addListener((tabId) => {
+  webmcpToolRegistry.delete(tabId);
+});
 
 // Re-registers every currently-registered/pending hostname against a fresh
 // dialogServerInfo. Called once, the first time dialog_server_ready
