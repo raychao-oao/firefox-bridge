@@ -445,6 +445,88 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   }
 });
 
+const WEBMCP_CALL_TIMEOUT_MS = 20_000;
+
+async function handleWebmcpListTools(msg) {
+  const entry = webmcpToolRegistry.get(msg.tabId);
+  if (!entry || !isWebmcpHostnameAllowed(entry.hostname, webmcpWhitelist)) {
+    return { ok: true, documentId: null, tools: [] };
+  }
+  return {
+    ok: true,
+    documentId: entry.documentId,
+    tools: [...entry.tools.values()],
+  };
+}
+
+async function handleWebmcpCallTool(msg) {
+  // Deliberate consistency choice, not a technical requirement -- see
+  // Global Constraints. privilegedGate covers both the lease check AND
+  // the blacklist policy check on the tab's current URL, matching every
+  // other privileged (page-content-touching) handler in this file. It
+  // does NOT check webmcpWhitelist -- that's the explicit check below.
+  const gate = await privilegedGate(msg, { frameId: 0 });
+  if (!gate.ok) return gate;
+
+  const entry = webmcpToolRegistry.get(msg.tabId);
+  if (!entry || entry.documentId !== msg.documentId) {
+    return { ok: false, error: 'stale_registration' };
+  }
+  if (!isWebmcpHostnameAllowed(entry.hostname, webmcpWhitelist)) {
+    // Distinct from stale_registration -- the registration itself is
+    // still valid (right documentId), but the hostname was removed from
+    // webmcpWhitelist since it registered. Live re-check, not a
+    // one-time authorization at registerTool() time.
+    return { ok: false, error: 'not_whitelisted' };
+  }
+  if (!entry.tools.has(msg.toolName)) {
+    return { ok: false, error: `unknown_tool: ${msg.toolName}` };
+  }
+
+  const requestId = crypto.randomUUID();
+  let timer; // captured in outer scope so the catch block below can clear it -- see the delivery-failure note
+  const resultPromise = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      webmcpPendingCalls.delete(requestId);
+      resolve({ ok: false, error: 'tool_call_timeout' });
+    }, WEBMCP_CALL_TIMEOUT_MS);
+    // tabId/documentId let Task 4's tool-result/tool-error handlers
+    // verify a result actually came from the document this call was
+    // dispatched to. Deliberately NOT bound to sessionId -- see the Map
+    // declaration comment in Task 4.
+    webmcpPendingCalls.set(requestId, { resolve, timer, tabId: msg.tabId, documentId: msg.documentId });
+  });
+
+  // Deliberately NOT sendToFrame() -- that path retries after reinjecting
+  // the content script into whatever document is now loaded, which is
+  // acceptable for a best-effort DOM action like click but wrong here: a
+  // WebMCP call whose target document is gone must fail once, not be
+  // silently replayed into a document the caller never asked about. The
+  // {documentId} delivery option makes Firefox itself the enforcement
+  // point -- it simply won't deliver to a tab whose current document
+  // doesn't match.
+  try {
+    await browser.tabs.sendMessage(
+      msg.tabId,
+      { type: 'webmcp-tool-call', requestId, toolName: msg.toolName, arguments: msg.arguments },
+      { documentId: msg.documentId }
+    );
+  } catch (err) {
+    // A scoped review found an earlier version of this catch block
+    // deleted the pending entry but never cleared its timer, leaking a
+    // 20-second orphan timer, and returned an ad-hoc
+    // content_script_unreachable code that didn't match the spec's
+    // documented stale_registration shape. Both fixed here -- delivery
+    // failure means the same thing as a documentId mismatch above: the
+    // call's target document is gone.
+    clearTimeout(timer);
+    webmcpPendingCalls.delete(requestId);
+    return { ok: false, error: 'stale_registration' };
+  }
+
+  return resultPromise;
+}
+
 // Re-registers every currently-registered/pending hostname against a fresh
 // dialogServerInfo. Called once, the first time dialog_server_ready
 // arrives (draining pendingDialogHostnames), and again on every SUBSEQUENT
@@ -887,6 +969,10 @@ async function handleNativeMessage(msg) {
         return respond(await handleAddWebmcpWhitelist(msg));
       case 'remove_webmcp_whitelist':
         return respond(await handleRemoveWebmcpWhitelist(msg));
+      case 'webmcp_list_tools':
+        return respond(await handleWebmcpListTools(msg));
+      case 'webmcp_call_tool':
+        return respond(await handleWebmcpCallTool(msg));
       case 'acquire_tab':
         return respond(await handleAcquireTab(msg));
       case 'open_private_window':
