@@ -228,6 +228,130 @@ browser.storage.onChanged.addListener((changes, area) => {
 });
 loadDialogWhitelist();
 
+// WebMCP shim whitelist. Independent of dialogWhitelist -- see
+// extension/webmcp-whitelist.js's header comment for why the two lists
+// are kept separate despite identical normalization logic. Unlike the
+// dialog hook, webmcp-hook.js needs no port/token baked in, so there's no
+// "pending until server ready" queue here -- registration happens
+// immediately.
+let webmcpWhitelist = [];
+const webmcpHookRegistrations = new Map(); // hostname -> RegisteredContentScript
+
+// Same lifecycle-serialization rationale as dialogLifecycleQueue above:
+// registerWebmcpHook() only inserts into webmcpHookRegistrations AFTER
+// browser.contentScripts.register() resolves, so concurrent register/
+// unregister calls for the same hostname (e.g. a rapid add-then-remove)
+// must be serialized to avoid leaking a RegisteredContentScript handle or
+// double-registering.
+let webmcpLifecycleQueue = Promise.resolve();
+function enqueueWebmcpLifecycle(fn, hostname) {
+  const next = webmcpLifecycleQueue.then(async () => {
+    try {
+      await fn();
+    } catch (err) {
+      console.error('webmcp hook lifecycle operation failed for', hostname, err);
+    }
+  });
+  webmcpLifecycleQueue = next;
+  return next;
+}
+
+async function registerWebmcpHook(hostname) {
+  if (webmcpHookRegistrations.has(hostname)) return;
+  const registered = await browser.contentScripts.register({
+    matches: [`*://${hostname}/*`, `*://*.${hostname}/*`],
+    js: [{ code: buildWebmcpHookSource() }],
+    runAt: 'document_start',
+    // MAIN world runs in the page's own JS execution context -- required
+    // so document.modelContext is visible to the page's own script.
+    // allFrames defaults to false (not set here), which is what confines
+    // this shim to the top-level frame only -- matching this feature's
+    // explicit no-iframe-support scope decision at the injection layer
+    // itself, not just as a downstream filter.
+    world: 'MAIN',
+  });
+  webmcpHookRegistrations.set(hostname, registered);
+}
+
+async function unregisterWebmcpHook(hostname) {
+  const registered = webmcpHookRegistrations.get(hostname);
+  if (registered) {
+    await registered.unregister();
+    webmcpHookRegistrations.delete(hostname);
+  }
+}
+
+async function loadWebmcpWhitelist() {
+  const stored = await browser.storage.local.get('webmcpWhitelist');
+  webmcpWhitelist = stored.webmcpWhitelist || [];
+  for (const hostname of webmcpWhitelist) {
+    await enqueueWebmcpLifecycle(() => registerWebmcpHook(hostname), hostname);
+  }
+}
+
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.webmcpWhitelist) return;
+  const oldSet = new Set(changes.webmcpWhitelist.oldValue || []);
+  const newSet = new Set(changes.webmcpWhitelist.newValue || []);
+  webmcpWhitelist = [...newSet];
+  for (const hostname of newSet) {
+    if (!oldSet.has(hostname)) enqueueWebmcpLifecycle(() => registerWebmcpHook(hostname), hostname);
+  }
+  for (const hostname of oldSet) {
+    if (!newSet.has(hostname)) enqueueWebmcpLifecycle(() => unregisterWebmcpHook(hostname), hostname);
+  }
+});
+loadWebmcpWhitelist();
+
+async function handleAddWebmcpWhitelist(msg) {
+  const hostname = normalizeWebmcpHostname(msg.hostname);
+  if (!hostname) return { ok: false, error: 'invalid_hostname' };
+  // Cross-check against the navigation blacklist, same rationale as
+  // handleAddDialogWhitelist: don't let a whitelisted-for-WebMCP hostname
+  // bypass a hostname the user explicitly blacklisted from navigation.
+  if (policyGate.isBlacklisted(`https://${hostname}`)) {
+    return { ok: false, error: 'blacklisted' };
+  }
+  if (webmcpWhitelist.includes(hostname)) return { ok: true, hostname };
+
+  // Update the in-memory array directly, synchronously -- see this task's
+  // header note on the storage.onChanged race a scoped review found.
+  // storage.onChanged still fires from the set() below and re-triggers
+  // registerWebmcpHook(), but that's a harmless no-op given its own
+  // idempotency guard.
+  const previous = webmcpWhitelist;
+  webmcpWhitelist = [...webmcpWhitelist, hostname];
+  try {
+    await browser.storage.local.set({ webmcpWhitelist });
+  } catch (err) {
+    webmcpWhitelist = previous; // storage write failed -- don't leave memory diverged from persisted state
+    return { ok: false, error: 'storage_error' };
+  }
+  // Await the injection itself too, not just the storage write -- a
+  // second scoped review found the same race applied here: an immediate
+  // reload right after this handler returned could otherwise miss the
+  // shim if registration was still only queued via storage.onChanged.
+  await enqueueWebmcpLifecycle(() => registerWebmcpHook(hostname), hostname);
+  return { ok: true, hostname };
+}
+
+async function handleRemoveWebmcpWhitelist(msg) {
+  const hostname = normalizeWebmcpHostname(msg.hostname);
+  if (!hostname) return { ok: false, error: 'invalid_hostname' };
+  if (!webmcpWhitelist.includes(hostname)) return { ok: true, hostname };
+
+  const previous = webmcpWhitelist;
+  webmcpWhitelist = webmcpWhitelist.filter((h) => h !== hostname);
+  try {
+    await browser.storage.local.set({ webmcpWhitelist });
+  } catch (err) {
+    webmcpWhitelist = previous;
+    return { ok: false, error: 'storage_error' };
+  }
+  await enqueueWebmcpLifecycle(() => unregisterWebmcpHook(hostname), hostname);
+  return { ok: true, hostname };
+}
+
 // Re-registers every currently-registered/pending hostname against a fresh
 // dialogServerInfo. Called once, the first time dialog_server_ready
 // arrives (draining pendingDialogHostnames), and again on every SUBSEQUENT
@@ -666,6 +790,10 @@ async function handleNativeMessage(msg) {
         return respond(await handleAddDialogWhitelist(msg));
       case 'remove_dialog_whitelist':
         return respond(await handleRemoveDialogWhitelist(msg));
+      case 'add_webmcp_whitelist':
+        return respond(await handleAddWebmcpWhitelist(msg));
+      case 'remove_webmcp_whitelist':
+        return respond(await handleRemoveWebmcpWhitelist(msg));
       case 'acquire_tab':
         return respond(await handleAcquireTab(msg));
       case 'open_private_window':
