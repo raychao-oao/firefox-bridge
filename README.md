@@ -85,6 +85,10 @@ document.
 
 ## Install
 
+**Requires Firefox 153.0 or later** as of the WebMCP shim feature (native `documentId`
+support on `browser.tabs.onCommitted` is required; earlier versions will fail to load the
+extension).
+
 ### 1. Firefox extension
 
 Grab the signed `.xpi` from the [latest release](https://github.com/raychao-oao/firefox-bridge/releases/latest)
@@ -336,7 +340,14 @@ manual checklist to run through after changes there.
   hostname that's already blacklisted there
 - Console/network capture is top-frame only, not frame-aware
 - Text truncation is char-count-based, not byte-based (risk on CJK-heavy pages)
-- WebMCP integration deferred to a future version
+- WebMCP shim only supports the top-level frame — tools registered from inside an iframe
+  are never seen
+- WebMCP shim only shims `document.modelContext`, not `navigator.modelContext`
+- WebMCP shim has no `unregister` — a long-lived single-page-app's tool set only ever grows
+  across `registerTool()` calls; reload the page to reset it
+- WebMCP shim doesn't guard against a future native Firefox implementation of
+  `document.modelContext` — if Firefox ever ships one natively, this shim would currently
+  clobber it (acceptable for now since no such native implementation exists yet)
 - The toolbar button added for `request_tab_selection` uses Firefox's generic
   puzzle-piece icon — no dedicated icon asset was designed for this feature
 - `firefox-bridge-bot`'s scripts don't have `screenshot` or `upload_file` available on

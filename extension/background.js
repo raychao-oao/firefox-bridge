@@ -462,6 +462,23 @@ async function handleWebmcpListTools(msg) {
   if (!entry || !isWebmcpHostnameAllowed(entry.hostname, webmcpWhitelist)) {
     return { ok: true, documentId: null, tools: [] };
   }
+  // Whitelisted-for-WebMCP and blacklisted-for-navigation are separate
+  // lists -- a hostname can be in both. handleWebmcpCallTool is already
+  // protected against that case via privilegedGate's live policyCheck on
+  // the tab's current URL; this handler had no equivalent check, letting
+  // a blacklisted hostname's page-authored tool metadata (names,
+  // descriptions, schemas) be read without the confirmation prompt the
+  // blacklist exists to force. Re-check here too, same "nothing here"
+  // shape as the whitelist-removed case above, not a hard error.
+  let tab;
+  try {
+    tab = await browser.tabs.get(msg.tabId);
+  } catch (err) {
+    return { ok: true, documentId: null, tools: [] };
+  }
+  if (policyGate.isBlacklisted(tab.url)) {
+    return { ok: true, documentId: null, tools: [] };
+  }
   return {
     ok: true,
     documentId: entry.documentId,

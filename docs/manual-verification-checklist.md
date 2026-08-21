@@ -934,3 +934,59 @@ already connected.
       `mcp-server` process (Ctrl-C) while it holds a lease..."). Confirm
       the badge/menu item for that request clears
       without needing the 120s deadline to pass.
+
+### WebMCP shim (add_webmcp_whitelist, remove_webmcp_whitelist, webmcp_list_tools, webmcp_call_tool)
+
+- [x] **Registration and metadata.** Whitelist a hostname
+      (`add_webmcp_whitelist`), navigate/reload a page that calls
+      `document.modelContext.registerTool(...)`, call `webmcp_list_tools`
+      -- confirm the registered tools appear with correct metadata and a
+      non-null `documentId`.
+- [x] **Real tool call.** `acquire_tab` the tab, call `webmcp_call_tool`
+      for a registered tool with real arguments -- confirm it returns the
+      tool's real, structured result (not an error).
+- [x] **Reload invalidates the old documentId, not the tool set.** Reload
+      the page -- confirm the OLD `documentId` now returns
+      `{ ok: false, error: 'stale_registration' }` from
+      `webmcp_call_tool`, while a fresh `webmcp_list_tools` call returns a
+      NEW `documentId` with tools freshly re-registered (this proves the
+      `onCommitted` registry-clear race-fix works -- a fresh registration
+      must survive, not get wiped).
+- [x] **Closed tab.** Close the tab -- confirm `webmcp_list_tools` for
+      that (now-closed) `tabId` fails cleanly (empty/null result), not a
+      hang or exception.
+- [x] **Lease required for calls.** On a whitelisted+loaded tab, call
+      `webmcp_call_tool` WITHOUT first calling `acquire_tab` -- confirm it
+      fails with `{ ok: false, error: 'not_leased' }`.
+- [x] **Whitelist removal doesn't retroactively inject.** `remove_webmcp_whitelist`
+      the hostname, open a NEW tab (not a reload) to the same URL --
+      confirm `webmcp_list_tools` sees no tools (the shim was never
+      injected on this new tab).
+- [x] **Navigate-away mid-call.** On a whitelisted page with a
+      slow-resolving tool `execute()` (e.g. a local test page with an
+      artificial delay), start a `webmcp_call_tool` call, then navigate
+      the tab away before it resolves -- confirm the call fails cleanly
+      (`stale_registration`) rather than hanging or having its result
+      delivered into the new, unrelated page.
+- [x] **Forged postMessage rejection.** On a NON-whitelisted page,
+      manually forge a `tool.register` `window.postMessage` (matching the
+      shim's `{source: 'firefox-bridge-webmcp', version: 1, type:
+      'tool.register', ...}` envelope) -- confirm `webmcp_list_tools`
+      never sees the forged tool (rejected in `background.js`, not by the
+      always-present relay). On a WHITELISTED page, forge a malformed
+      `tool.register` message (e.g. `tool: null`) -- confirm it's
+      silently rejected with no crash and doesn't affect the page's own
+      genuine registrations.
+- [x] **Registry survives session/host churn, whitelist removal without
+      reload responds immediately.** With a tab already registered,
+      reconnect the MCP client (fires the extension's session-ended hook,
+      not a native-host restart) -- confirm the registry (same
+      `documentId`/tools) survives. Separately, force a native-host
+      process restart -- confirm the registry STILL survives (only
+      in-flight pending `webmcp_call_tool` calls get rejected by a
+      port-loss event, never the registry itself). Then remove the
+      whitelist WITHOUT reloading an already-registered tab -- confirm
+      `webmcp_list_tools` immediately returns empty and
+      `webmcp_call_tool` against it returns
+      `{ ok: false, error: 'not_whitelisted' }` (distinct from
+      `stale_registration`).
