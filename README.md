@@ -120,6 +120,12 @@ Firefox after this and after installing the extension.
 On Windows, the installer creates a `.cmd` launcher and registers the manifest under
 `HKCU\Software\Mozilla\NativeMessagingHosts`, so administrator rights are not required.
 
+**LibreWolf** (or any other Firefox-based browser using the same vendor-dir convention) is also
+supported — pass `--browser=librewolf` (or set `FIREFOX_BRIDGE_BROWSER=librewolf`) to install the
+manifest into LibreWolf's own native-messaging-hosts location instead of Firefox's. Firefox and
+LibreWolf each need their own manifest installed (run the script once per browser); they don't
+share one. The signed `.xpi` itself needs no changes — same extension ID works in both.
+
 ### 3. MCP server
 
 Register with Claude Code (or any MCP-capable CLI):

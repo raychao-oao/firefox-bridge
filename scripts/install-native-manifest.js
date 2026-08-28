@@ -12,18 +12,43 @@ const repoDir = process.env.FIREFOX_BRIDGE_REPO_DIR
 const NATIVE_HOST_ENTRY = path.join(repoDir, 'native-host', 'src', 'index.js');
 const HOST_NAME = 'firefox_bridge_native_host';
 
-function manifestDirForPlatform() {
+// Per-browser vendor dir name used in each platform's native-messaging-hosts
+// path. "firefox" -> Mozilla is the only one live-verified (macOS: confirmed
+// by launching LibreWolf and inspecting ~/Library/Application Support/;
+// Linux: per LibreWolf's own native-messaging docs). The win32 LibreWolf
+// entries follow the same Mozilla->LibreWolf renaming pattern by analogy but
+// are NOT independently verified -- test before relying on them.
+const BROWSER_VENDOR_DIR = {
+  firefox: 'Mozilla',
+  librewolf: 'LibreWolf',
+};
+
+function resolveBrowser() {
+  const arg = process.argv.find((a) => a.startsWith('--browser='));
+  const browser = (arg ? arg.slice('--browser='.length) : process.env.FIREFOX_BRIDGE_BROWSER || 'firefox').toLowerCase();
+  if (!(browser in BROWSER_VENDOR_DIR)) {
+    throw new Error(`Unknown --browser value: ${browser}. Supported: ${Object.keys(BROWSER_VENDOR_DIR).join(', ')}`);
+  }
+  return browser;
+}
+
+function manifestDirForPlatform(browser) {
   if (process.env.FIREFOX_BRIDGE_MANIFEST_DIR) {
     return path.resolve(process.env.FIREFOX_BRIDGE_MANIFEST_DIR);
   }
   const home = homedir();
+  const vendorDir = BROWSER_VENDOR_DIR[browser];
   switch (platform()) {
     case 'darwin':
-      return path.join(home, 'Library', 'Application Support', 'Mozilla', 'NativeMessagingHosts');
+      return path.join(home, 'Library', 'Application Support', vendorDir, 'NativeMessagingHosts');
     case 'linux':
-      return path.join(home, '.mozilla', 'native-messaging-hosts');
+      // Firefox: ~/.mozilla/native-messaging-hosts
+      // LibreWolf: ~/.librewolf/native-messaging-hosts (LibreWolf's documented
+      // location; some newer LibreWolf versions also read the Mozilla path,
+      // but the LibreWolf-specific one works across versions).
+      return path.join(home, `.${vendorDir.toLowerCase()}`, 'native-messaging-hosts');
     case 'win32':
-      return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Mozilla', 'NativeMessagingHosts');
+      return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), vendorDir, 'NativeMessagingHosts');
     default:
       throw new Error(
         `Unsupported platform for automatic native messaging manifest install: ${platform()}. ` +
@@ -59,19 +84,20 @@ async function writeLauncherScript(manifestDir) {
   return launcherPath;
 }
 
-function registerWindowsManifest(manifestPath) {
+function registerWindowsManifest(manifestPath, browser) {
   if (platform() !== 'win32') return;
-  const key = `HKCU\\Software\\Mozilla\\NativeMessagingHosts\\${HOST_NAME}`;
+  const key = `HKCU\\Software\\${BROWSER_VENDOR_DIR[browser]}\\NativeMessagingHosts\\${HOST_NAME}`;
   const result = spawnSync('reg.exe', ['add', key, '/ve', '/t', 'REG_SZ', '/d', manifestPath, '/f'], {
     encoding: 'utf8',
   });
   if (result.status !== 0) {
-    throw new Error(`Failed to register Firefox native messaging host: ${result.stderr || result.stdout}`);
+    throw new Error(`Failed to register ${browser} native messaging host: ${result.stderr || result.stdout}`);
   }
 }
 
 async function main() {
-  const manifestDir = manifestDirForPlatform();
+  const browser = resolveBrowser();
+  const manifestDir = manifestDirForPlatform(browser);
   await mkdir(manifestDir, { recursive: true });
   const launcherPath = await writeLauncherScript(manifestDir);
 
@@ -85,12 +111,12 @@ async function main() {
 
   const manifestPath = path.join(manifestDir, `${HOST_NAME}.json`);
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-  registerWindowsManifest(manifestPath);
+  registerWindowsManifest(manifestPath, browser);
 
   console.log(`Installed native messaging manifest at: ${manifestPath}`);
   console.log(`Launcher script: ${launcherPath}`);
-  if (platform() === 'win32') console.log('Registered the native messaging host under HKCU for Firefox.');
-  console.log('Restart Firefox, then ensure the firefox-bridge extension is enabled.');
+  if (platform() === 'win32') console.log(`Registered the native messaging host under HKCU for ${browser}.`);
+  console.log(`Restart ${browser}, then ensure the firefox-bridge extension is enabled.`);
 }
 
 main().catch((err) => {
