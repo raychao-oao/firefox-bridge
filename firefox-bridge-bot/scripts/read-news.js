@@ -329,6 +329,18 @@ export default {
       }
       tabIdsToClose.push(feedTab.tabId);
 
+      // Without this, readPage can race Firefox's own document setup for
+      // the feed tab -- browser.tabs.sendMessage resolves undefined (not a
+      // rejection) if the content script's message port isn't up yet,
+      // which crashes background.js's forwardToContentScript on `result.ok`
+      // and surfaces here as a generic-looking topLevelError. readOne()
+      // below already waits before reading an article; the feed/listing
+      // page itself needs the same treatment. Reproduced live: this raced
+      // reliably for a large feed (LTN's "all" category, ~40KB of XML)
+      // fired back-to-back with no delay, but never raced when spaced out
+      // by normal tool round-trip latency.
+      await bridge.waitForNetworkIdle(feedTab.tabId, { timeoutMs: 8000 });
+
       const page = await bridge.readPage(feedTab.tabId, { frameId: 0 });
       if (!page.ok || !page.text) {
         await Promise.all(tabIdsToClose.map((tabId) => bridge.closeTab(tabId)));
@@ -364,6 +376,9 @@ export default {
         return { topLevelError: listing.error };
       }
       tabIdsToClose.push(listing.tabId);
+
+      // Same race as the feed-fetch branch above -- see that comment.
+      await bridge.waitForNetworkIdle(listing.tabId, { timeoutMs: 8000 });
 
       const elementsResult = await bridge.listElements({ tabId: listing.tabId, filter: { tag: 'a' } });
       if (!elementsResult.ok) {
