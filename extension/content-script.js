@@ -72,6 +72,43 @@ if (window.__firefoxBridgeContentScriptInstalled) {
     ' ': { code: 'Space', keyCode: 32 },
   };
 
+  // Builds and dispatches a synthetic keydown/keypress/keyup sequence for one
+  // key press. Shared by press_key and type's keyevents mode so the
+  // KeyboardEventInit-construction logic (KEY_CODE_MAP lookup / single-char
+  // ASCII fallback) lives in exactly one place. Synthetic (dispatchEvent)
+  // KeyboardEvents are always isTrusted:false -- Firefox does not run native
+  // keyboard default actions (form submission on Enter, native dialog
+  // dismissal on Escape) for these; JS keydown/keyup listeners on the page DO
+  // see them, which is every caller's actual use case. keypress only fires
+  // for single-character keys, matching real browsers' legacy keypress
+  // behavior for printable keys.
+  function fbDispatchKeyEvent(target, key, modifiers = {}) {
+    let code = '';
+    let keyCode = 0;
+    if (KEY_CODE_MAP[key]) {
+      ({ code, keyCode } = KEY_CODE_MAP[key]);
+    } else if (key.length === 1) {
+      const upper = key.toUpperCase();
+      keyCode = upper.charCodeAt(0);
+      code = /[A-Z]/.test(upper) ? `Key${upper}` : /[0-9]/.test(upper) ? `Digit${upper}` : '';
+    }
+    const eventInit = {
+      key,
+      code,
+      keyCode,
+      which: keyCode,
+      bubbles: true,
+      cancelable: true,
+      shiftKey: !!modifiers.shift,
+      ctrlKey: !!modifiers.ctrl,
+      altKey: !!modifiers.alt,
+      metaKey: !!modifiers.meta,
+    };
+    target.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+    if (key.length === 1) target.dispatchEvent(new KeyboardEvent('keypress', eventInit));
+    target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+  }
+
   // domEpoch identifies "this DOM instance" -- scoped per content-script
   // execution, i.e. per FRAME (this project's manifest.json has
   // content_scripts.all_frames: true, so an iframe's domEpoch is
@@ -211,6 +248,29 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       }
       if (!el) return Promise.resolve({ ok: false, error: 'element_not_found' });
       el.focus();
+      if (msg.mode === 'keyevents') {
+        // Sends a real keydown/keypress/keyup sequence per character instead
+        // of execCommand -- for targets that only listen to keydown events
+        // (e.g. custom xterm.js-style terminal widgets like Defender Live
+        // Response's, which never fire input/beforeinput so the execCommand
+        // path below is invisible to them). Runs BEFORE the SELECT/
+        // contenteditable/native-input branches below because such targets
+        // are typically plain <div>/custom elements those branches would
+        // otherwise reject as not_typable. No insertion/replacement
+        // semantics -- this only sends keystrokes at the target's current
+        // cursor position and relies entirely on the target's own JS to
+        // interpret them (unlike the other branches, which actually set the
+        // element's value/content). \r\n and lone \r are normalized to \n,
+        // then each \n sends the Enter key sequence (see KEY_CODE_MAP) so a
+        // full multi-line command can be typed AND submitted in one call.
+        // Iterates by Unicode code point (`for...of`, not string indexing)
+        // so surrogate-pair characters (e.g. emoji) aren't split in half.
+        const normalized = msg.text.replace(/\r\n|\r/g, '\n');
+        for (const ch of normalized) {
+          fbDispatchKeyEvent(el, ch === '\n' ? 'Enter' : ch, {});
+        }
+        return Promise.resolve({ ok: true });
+      }
       if (el.tagName === 'SELECT') {
         // A <select>'s native value setter isn't on HTMLInputElement's
         // prototype -- calling that setter via .call() on a select throws
@@ -804,38 +864,7 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         // transport error instead of "nothing focusable here."
         if (!target) return Promise.resolve({ ok: false, error: 'no_active_element' });
       }
-      const modifiers = msg.modifiers || {};
-      // Best-effort code/keyCode/which -- see KEY_CODE_MAP above for scope.
-      let code = '';
-      let keyCode = 0;
-      if (KEY_CODE_MAP[msg.key]) {
-        ({ code, keyCode } = KEY_CODE_MAP[msg.key]);
-      } else if (msg.key.length === 1) {
-        const upper = msg.key.toUpperCase();
-        keyCode = upper.charCodeAt(0);
-        code = /[A-Z]/.test(upper) ? `Key${upper}` : /[0-9]/.test(upper) ? `Digit${upper}` : '';
-      }
-      const eventInit = {
-        key: msg.key,
-        code,
-        keyCode,
-        which: keyCode,
-        bubbles: true,
-        cancelable: true,
-        shiftKey: !!modifiers.shift,
-        ctrlKey: !!modifiers.ctrl,
-        altKey: !!modifiers.alt,
-        metaKey: !!modifiers.meta,
-      };
-      // Synthetic (dispatchEvent) KeyboardEvents are always isTrusted:false --
-      // Firefox does not run native keyboard default actions (form
-      // submission on Enter, native dialog dismissal on Escape) for these.
-      // JS keydown/keyup listeners on the page DO see them, which is this
-      // tool's actual use case. keypress only for single-character keys,
-      // matching real browsers' legacy keypress behavior for printable keys.
-      target.dispatchEvent(new KeyboardEvent('keydown', eventInit));
-      if (msg.key.length === 1) target.dispatchEvent(new KeyboardEvent('keypress', eventInit));
-      target.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+      fbDispatchKeyEvent(target, msg.key, msg.modifiers || {});
       return Promise.resolve({ ok: true });
     }
 
