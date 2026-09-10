@@ -72,25 +72,90 @@ if (window.__firefoxBridgeContentScriptInstalled) {
     ' ': { code: 'Space', keyCode: 32 },
   };
 
+  // US-keyboard punctuation, keyed by the exact `key` character. Each entry
+  // names the physical key's `code` and its real legacy `keyCode` -- NOT the
+  // character's ASCII code. This distinction is load-bearing: ASCII 33-46
+  // (covering `!"#$%&'()*+,-./`) numerically collide with the real legacy
+  // keyCode values for PageUp/PageDown/End/Home/Arrows/Insert/Delete
+  // (33=PageUp, 35=End, 37=ArrowLeft, 38=ArrowUp, 40=ArrowDown, 45=Insert,
+  // 46=Delete, etc). A naive "use the character's ASCII value as keyCode"
+  // fallback (the previous approach here) would send those colliding
+  // keyCodes for ordinary punctuation -- confirmed live against Microsoft
+  // Defender Live Response's terminal (2026-09-10): '%' (ASCII 37) was
+  // silently consumed as ArrowLeft, '-' (45) as Insert, '.' (46) as Delete,
+  // and combinations of '!#&(' produced literal ANSI escape sequences
+  // (`\x1b[5~`, `\x1b[F`, `\x1b[A`, `\x1b[B`) in the typed command line --
+  // that terminal reconstructs actual keystrokes from `event.keyCode`, like
+  // a remote-shell/VT100 relay would, so a colliding keyCode is
+  // indistinguishable from a real navigation key press. A real browser
+  // never produces this collision (real punctuation keyCodes are all >=186
+  // for unshifted keys), so it only occurs because of synthetic dispatch --
+  // this table exists specifically so firefox-bridge never sends one.
+  // `shiftKey: true` marks a shifted symbol (e.g. '_' is Shift+Minus) so its
+  // code/keyCode correctly describe the physical key, not the character.
+  const PUNCT_CODE_MAP = {
+    '-': { code: 'Minus', keyCode: 189 },
+    '=': { code: 'Equal', keyCode: 187 },
+    '[': { code: 'BracketLeft', keyCode: 219 },
+    ']': { code: 'BracketRight', keyCode: 221 },
+    '\\': { code: 'Backslash', keyCode: 220 },
+    ';': { code: 'Semicolon', keyCode: 186 },
+    "'": { code: 'Quote', keyCode: 222 },
+    ',': { code: 'Comma', keyCode: 188 },
+    '.': { code: 'Period', keyCode: 190 },
+    '/': { code: 'Slash', keyCode: 191 },
+    '`': { code: 'Backquote', keyCode: 192 },
+    _: { code: 'Minus', keyCode: 189, shiftKey: true },
+    '+': { code: 'Equal', keyCode: 187, shiftKey: true },
+    '{': { code: 'BracketLeft', keyCode: 219, shiftKey: true },
+    '}': { code: 'BracketRight', keyCode: 221, shiftKey: true },
+    '|': { code: 'Backslash', keyCode: 220, shiftKey: true },
+    ':': { code: 'Semicolon', keyCode: 186, shiftKey: true },
+    '"': { code: 'Quote', keyCode: 222, shiftKey: true },
+    '<': { code: 'Comma', keyCode: 188, shiftKey: true },
+    '>': { code: 'Period', keyCode: 190, shiftKey: true },
+    '?': { code: 'Slash', keyCode: 191, shiftKey: true },
+    '~': { code: 'Backquote', keyCode: 192, shiftKey: true },
+    '!': { code: 'Digit1', keyCode: 49, shiftKey: true },
+    '@': { code: 'Digit2', keyCode: 50, shiftKey: true },
+    '#': { code: 'Digit3', keyCode: 51, shiftKey: true },
+    $: { code: 'Digit4', keyCode: 52, shiftKey: true },
+    '%': { code: 'Digit5', keyCode: 53, shiftKey: true },
+    '^': { code: 'Digit6', keyCode: 54, shiftKey: true },
+    '&': { code: 'Digit7', keyCode: 55, shiftKey: true },
+    '*': { code: 'Digit8', keyCode: 56, shiftKey: true },
+    '(': { code: 'Digit9', keyCode: 57, shiftKey: true },
+    ')': { code: 'Digit0', keyCode: 48, shiftKey: true },
+  };
+
   // Builds and dispatches a synthetic keydown/keypress/keyup sequence for one
   // key press. Shared by press_key and type's keyevents mode so the
-  // KeyboardEventInit-construction logic (KEY_CODE_MAP lookup / single-char
-  // ASCII fallback) lives in exactly one place. Synthetic (dispatchEvent)
-  // KeyboardEvents are always isTrusted:false -- Firefox does not run native
-  // keyboard default actions (form submission on Enter, native dialog
-  // dismissal on Escape) for these; JS keydown/keyup listeners on the page DO
-  // see them, which is every caller's actual use case. keypress only fires
-  // for single-character keys, matching real browsers' legacy keypress
-  // behavior for printable keys.
+  // KeyboardEventInit-construction logic (KEY_CODE_MAP/PUNCT_CODE_MAP lookup
+  // / single-char letter-digit fallback) lives in exactly one place.
+  // Synthetic (dispatchEvent) KeyboardEvents are always isTrusted:false --
+  // Firefox does not run native keyboard default actions (form submission on
+  // Enter, native dialog dismissal on Escape) for these; JS keydown/keyup
+  // listeners on the page DO see them, which is every caller's actual use
+  // case. keypress only fires for single-character keys, matching real
+  // browsers' legacy keypress behavior for printable keys.
   function fbDispatchKeyEvent(target, key, modifiers = {}) {
     let code = '';
     let keyCode = 0;
+    let impliedShift = false;
     if (KEY_CODE_MAP[key]) {
       ({ code, keyCode } = KEY_CODE_MAP[key]);
+    } else if (PUNCT_CODE_MAP[key]) {
+      ({ code, keyCode, shiftKey: impliedShift = false } = PUNCT_CODE_MAP[key]);
     } else if (key.length === 1) {
       const upper = key.toUpperCase();
-      keyCode = upper.charCodeAt(0);
       code = /[A-Z]/.test(upper) ? `Key${upper}` : /[0-9]/.test(upper) ? `Digit${upper}` : '';
+      // Only letters/digits fall through to here -- ASCII happens to equal
+      // the real legacy keyCode for exactly those two ranges (A-Z: 65-90,
+      // 0-9: 48-57), which is why this fallback is safe only for them. Any
+      // other single character (unmapped punctuation, non-ASCII) keeps
+      // keyCode 0 rather than risk another accidental collision like the
+      // one PUNCT_CODE_MAP exists to prevent.
+      if (code) keyCode = upper.charCodeAt(0);
     }
     const eventInit = {
       key,
@@ -99,7 +164,7 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       which: keyCode,
       bubbles: true,
       cancelable: true,
-      shiftKey: !!modifiers.shift,
+      shiftKey: !!modifiers.shift || impliedShift,
       ctrlKey: !!modifiers.ctrl,
       altKey: !!modifiers.alt,
       metaKey: !!modifiers.meta,
@@ -265,11 +330,27 @@ if (window.__firefoxBridgeContentScriptInstalled) {
         // full multi-line command can be typed AND submitted in one call.
         // Iterates by Unicode code point (`for...of`, not string indexing)
         // so surrogate-pair characters (e.g. emoji) aren't split in half.
+        //
+        // A small delay is awaited between characters (not dispatched in a
+        // single synchronous burst) as a cheap defensive measure against
+        // targets whose keydown handler updates state asynchronously (e.g. a
+        // React re-render not yet committed when the next keydown arrives).
+        // NOTE: live-testing against Defender Live Response initially showed
+        // punctuation characters being dropped and this delay was suspected
+        // -- confirmed NOT the cause (15ms vs 150ms made zero difference,
+        // and the drop was 100% deterministic by character identity, not
+        // timing-dependent). The real cause was a keyCode-collision bug in
+        // this function's old fallback, now fixed by PUNCT_CODE_MAP above.
+        // The delay is kept anyway since it's low-cost and may still help
+        // some other, less pathological target.
         const normalized = msg.text.replace(/\r\n|\r/g, '\n');
-        for (const ch of normalized) {
-          fbDispatchKeyEvent(el, ch === '\n' ? 'Enter' : ch, {});
-        }
-        return Promise.resolve({ ok: true });
+        return (async () => {
+          for (const ch of normalized) {
+            fbDispatchKeyEvent(el, ch === '\n' ? 'Enter' : ch, {});
+            await new Promise((resolve) => setTimeout(resolve, 15));
+          }
+          return { ok: true };
+        })();
       }
       if (el.tagName === 'SELECT') {
         // A <select>'s native value setter isn't on HTMLInputElement's
