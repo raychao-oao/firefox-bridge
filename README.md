@@ -74,6 +74,17 @@ means the click event was dispatched — it is not a guarantee that the effect y
 actually happened (e.g. a JS-initiated navigation may not be reflected in `navigated` yet;
 see `wait_for` for polling a page to a target state).
 
+`type` has three modes via `mode` (default `insert`): `insert` overwrites an
+`<input>`/`<textarea>`/`contenteditable`'s content via `execCommand('insertText', ...)`, the
+usual case. `keyevents` dispatches a synthetic `keydown`→`keypress`→`keyup` sequence per
+character instead — for custom widgets (e.g. xterm.js-style terminals like Microsoft Defender
+Live Response's console) that only listen to real keyboard events and never see
+`input`/`beforeinput`; `\n` sends Enter so a command plus submission can be one call. `paste`
+writes `text` to the OS clipboard then triggers a real `execCommand('paste')` against the
+target — for widgets that have a native paste handler but whose keydown-only typing path drops
+certain characters (Space, notably, on some terminals); it overwrites the user's current
+clipboard as a side effect and only works if the target actually has paste support at all.
+
 `add_webmcp_whitelist`/`remove_webmcp_whitelist` opt a hostname in or out of a compatibility
 shim for the experimental [WebMCP](https://w3c-cg.github.io/aikr/webMCP/webmcp-technical-notes.html)
 API (`document.modelContext.registerTool`) — separate from the dialog-interception whitelist,

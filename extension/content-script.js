@@ -313,6 +313,18 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       }
       if (!el) return Promise.resolve({ ok: false, error: 'element_not_found' });
       el.focus();
+      if (msg.mode === 'paste') {
+        // Writes text to the OS clipboard, then triggers the browser's real
+        // native paste pipeline against the target. This reaches widgets
+        // that only listen for a native `paste` event (e.g. xterm.js-based
+        // terminals with clipboard-paste support built in) and, unlike
+        // synthetic KeyboardEvents, can deliver characters like Space that
+        // such widgets' keydown-only input path silently drops.
+        return navigator.clipboard.writeText(msg.text).then(() => {
+          const ok = document.execCommand('paste');
+          return { ok };
+        }, (err) => ({ ok: false, error: String(err) }));
+      }
       if (msg.mode === 'keyevents') {
         // Sends a real keydown/keypress/keyup sequence per character instead
         // of execCommand -- for targets that only listen to keydown events
