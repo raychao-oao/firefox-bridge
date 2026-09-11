@@ -7,3 +7,5 @@ dist/
 *.log
 extension/.amo-upload-uuid
 .worktrees/
+.DS_Store
+.claude/
