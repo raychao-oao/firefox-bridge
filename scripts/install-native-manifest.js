@@ -1,5 +1,6 @@
 // repo/scripts/install-native-manifest.js
 import { writeFile, mkdir } from 'node:fs/promises';
+import { realpathSync, existsSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,6 +58,22 @@ function manifestDirForPlatform(browser) {
   }
 }
 
+// process.execPath resolves through symlinks to the real versioned binary
+// (e.g. /opt/homebrew/Cellar/node/26.4.0/bin/node) rather than the stable
+// Homebrew symlink (/opt/homebrew/bin/node). Every `brew upgrade node` moves
+// that real path, silently breaking the launcher until this script is rerun.
+// Prefer the stable symlink when it actually resolves to the same binary
+// currently running this installer.
+function resolveStableNodePath() {
+  const candidates = ['/opt/homebrew/bin/node', '/usr/local/bin/node'];
+  for (const candidate of candidates) {
+    if (existsSync(candidate) && realpathSync(candidate) === realpathSync(process.execPath)) {
+      return candidate;
+    }
+  }
+  return process.execPath;
+}
+
 async function writeLauncherScript(manifestDir) {
   // Firefox spawns whatever `path` the manifest points to directly; on most
   // systems that must be an executable, not a .js file handed to `node`.
@@ -69,17 +86,19 @@ async function writeLauncherScript(manifestDir) {
   // /usr/local/bin (Intel) -- `exec node ...` would silently fail to find
   // node with no useful error surfaced back through the native messaging
   // port. Use the absolute path to the node binary that is running this
-  // installer script (process.execPath) instead of relying on PATH.
+  // installer script (resolveStableNodePath()) instead of relying on PATH.
+  const nodePath = resolveStableNodePath();
+
   if (platform() === 'win32') {
     const launcherPath = path.join(manifestDir, '..', 'firefox-bridge-launch.cmd');
     const escapeBatch = (value) => value.replaceAll('%', '%%').replaceAll('"', '""');
-    const script = `@echo off\r\n"${escapeBatch(process.execPath)}" "${escapeBatch(NATIVE_HOST_ENTRY)}"\r\n`;
+    const script = `@echo off\r\n"${escapeBatch(nodePath)}" "${escapeBatch(NATIVE_HOST_ENTRY)}"\r\n`;
     await writeFile(launcherPath, script);
     return launcherPath;
   }
 
   const launcherPath = path.join(manifestDir, '..', 'firefox-bridge-launch.sh');
-  const script = `#!/bin/sh\nexec "${process.execPath}" "${NATIVE_HOST_ENTRY}"\n`;
+  const script = `#!/bin/sh\nexec "${nodePath}" "${NATIVE_HOST_ENTRY}"\n`;
   await writeFile(launcherPath, script, { mode: 0o755 });
   return launcherPath;
 }
