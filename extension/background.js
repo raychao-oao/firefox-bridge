@@ -1033,6 +1033,8 @@ async function handleNativeMessage(msg) {
         return respond(await handleCloseTab(msg));
       case 'discard_tab':
         return respond(await handleDiscardTab(msg));
+      case 'activate_tab':
+        return respond(await handleActivateTab(msg));
       case 'go_back':
         return respond(await handleGoBack(msg));
       case 'go_forward':
@@ -1367,6 +1369,21 @@ function handleCloseTab(msg) {
     .remove(msg.tabId)
     .then(() => ({ ok: true }))
     .catch((err) => ({ ok: false, error: `unknown_tab: ${err.message}` }));
+}
+
+// Switches the user's visible tab, so it requires a lease like close_tab.
+// focusWindow additionally raises the tab's window; without it a tab in a
+// background window becomes that window's active tab but stays out of view.
+async function handleActivateTab(msg) {
+  const lease = checkLease(msg.sessionId, msg.tabId);
+  if (!lease.ok) return { ok: false, error: lease.error };
+  try {
+    const tab = await browser.tabs.update(msg.tabId, { active: true });
+    if (msg.focusWindow) await browser.windows.update(tab.windowId, { focused: true });
+    return { ok: true, windowId: tab.windowId };
+  } catch (err) {
+    return { ok: false, error: `unknown_tab: ${err.message}` };
+  }
 }
 
 // discard_tab intentionally does NOT reuse checkLease -- the primary use

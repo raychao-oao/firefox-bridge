@@ -274,6 +274,14 @@ that automated unit tests can't cover (real Firefox + real process spawning).
       limitation of the capture buffer not being cleared on navigation, not a
       regression to fix here)
 
+### Tab activation (activate_tab)
+
+- [ ] `activate_tab` on a leased background tab in the focused window — confirm it
+      becomes the visible tab
+- [ ] `activate_tab` without a lease on the `tabId` — confirm `not_leased`/`conflict` error
+- [ ] `activate_tab` with `focusWindow: true` on a tab in a different, background window —
+      confirm that window comes to the front; without `focusWindow` it does not
+
 ### Tab discard (discard_tab, list_tabs fields)
 
 - [ ] Discard a background (non-active) tab this session has not acquired —

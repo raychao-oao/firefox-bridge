@@ -385,6 +385,19 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'activate_tab',
+    {
+      description:
+        'Make a tab this session currently has leased the active (foreground) tab in its window, like clicking it in the tab strip. Set focusWindow: true to also raise that window to the front -- without it, a tab in a background window becomes that window\'s active tab but the window itself is not brought forward. Visibly changes what the user is looking at, so use it only when the foreground tab matters (e.g. a screenshot of a background tab, or showing the user something).',
+      inputSchema: { tabId: z.number(), focusWindow: z.boolean().optional() },
+    },
+    async ({ tabId, focusWindow }) => {
+      const result = await bridgeClient.call({ type: 'activate_tab', tabId, focusWindow: focusWindow === true });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'discard_tab',
     {
       description:
