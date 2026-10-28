@@ -310,3 +310,31 @@ test('webmcp_call_tool wraps a stale_registration failure with isError: true', a
   assert.equal(response.isError, true);
   assert.equal(response.content[0].text, JSON.stringify(failResult));
 });
+
+test('draw_stroke validates strokes and forwards the full payload to the bridge', async () => {
+  const server = makeFakeServer();
+  const bridgeClient = makeFakeBridgeClient({ ok: true, strokes: 1, points: 3 });
+  registerTools(server, bridgeClient);
+
+  const registration = server.registrations.get('draw_stroke');
+  assert.ok(registration, 'draw_stroke should be registered');
+  const shape = z.object(registration.config.inputSchema);
+
+  const stroke = [[0.1, 0.5], [0.5, 0.2], [0.9, 0.5]];
+  assert.equal(shape.safeParse({ tabId: 1, selector: 'canvas', strokes: [stroke] }).success, true);
+  assert.equal(shape.safeParse({ tabId: 1, selector: 'canvas', strokes: [stroke], units: 'px' }).success, true);
+  assert.equal(shape.safeParse({ tabId: 1, selector: 'canvas', strokes: [] }).success, false);
+  assert.equal(shape.safeParse({ tabId: 1, selector: 'canvas', strokes: [[]] }).success, false);
+  assert.equal(shape.safeParse({ tabId: 1, selector: 'canvas', strokes: [[[1, 2, 3]]] }).success, false);
+  assert.equal(shape.safeParse({ tabId: 1, selector: 'canvas', strokes: [stroke], units: 'em' }).success, false);
+
+  await registration.handler({ tabId: 1, selector: 'canvas', strokes: [stroke], units: 'px', frameId: 2 });
+  assert.deepEqual(bridgeClient.calls[0], {
+    type: 'draw_stroke',
+    tabId: 1,
+    selector: 'canvas',
+    strokes: [stroke],
+    units: 'px',
+    frameId: 2,
+  });
+});

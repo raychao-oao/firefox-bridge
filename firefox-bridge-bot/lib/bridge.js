@@ -166,6 +166,7 @@ export async function connectBridge({ socketDir = bridgeDir() } = {}) {
     click: (params) => action('click', params),
     type: (params) => action('type', params),
     hover: (params) => action('hover', params),
+    drawStroke: (params) => action('draw_stroke', params),
     listElements: (params) => action('list_elements', params),
     listFrames: (tabId) => action('list_frames', { tabId }),
     scrollTo: (params) => action('scroll_to', params),

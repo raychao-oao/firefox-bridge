@@ -612,6 +612,63 @@ if (window.__firefoxBridgeContentScriptInstalled) {
       return Promise.resolve({ ok: true });
     }
 
+    if (msg.type === 'draw_stroke') {
+      let el;
+      try {
+        el = document.querySelector(msg.selector);
+      } catch (err) {
+        return Promise.resolve({ ok: false, error: 'invalid_selector' });
+      }
+      if (!el) return Promise.resolve({ ok: false, error: 'element_not_found' });
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
+        return Promise.resolve({ ok: false, error: 'zero_size_element' });
+      }
+      // Points are either 0-1 fractions of the element's box ('ratio', the
+      // default -- independent of devicePixelRatio and CSS scaling) or CSS
+      // px offsets from its top-left ('px'). Both land as clientX/clientY,
+      // which is what pointer-aware canvas code reads.
+      const toClient = ([x, y]) =>
+        msg.units === 'px'
+          ? [rect.left + x, rect.top + y]
+          : [rect.left + x * rect.width, rect.top + y * rect.height];
+      // Same pointer identity as hover (pointerId 1 / isPrimary / mouse) so
+      // `if (!e.isPrimary)` guards pass. Both event families are dispatched
+      // because canvas widgets bind either one; MouseEvent ignores the
+      // pointer-only fields. These are untrusted synthetic events: a page
+      // that checks isTrusted, or calls setPointerCapture(e.pointerId)
+      // without a try/catch (no active pointer with that id -> throws and
+      // aborts its pointerdown handler), will not draw.
+      const init = (pt, buttons) => ({
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: pt[0],
+        clientY: pt[1],
+        button: 0,
+        buttons,
+        pointerId: 1,
+        isPrimary: true,
+        pointerType: 'mouse',
+        pressure: buttons ? 0.5 : 0,
+      });
+      let points = 0;
+      for (const stroke of msg.strokes) {
+        const pts = stroke.map(toClient);
+        el.dispatchEvent(new PointerEvent('pointerdown', init(pts[0], 1)));
+        el.dispatchEvent(new MouseEvent('mousedown', init(pts[0], 1)));
+        for (let i = 1; i < pts.length; i++) {
+          el.dispatchEvent(new PointerEvent('pointermove', init(pts[i], 1)));
+          el.dispatchEvent(new MouseEvent('mousemove', init(pts[i], 1)));
+        }
+        const last = pts[pts.length - 1];
+        el.dispatchEvent(new PointerEvent('pointerup', init(last, 0)));
+        el.dispatchEvent(new MouseEvent('mouseup', init(last, 0)));
+        points += pts.length;
+      }
+      return Promise.resolve({ ok: true, strokes: msg.strokes.length, points });
+    }
+
     if (msg.type === 'read_page') {
       const xmlResult = tryReadXmlFallback();
       if (xmlResult) return Promise.resolve(xmlResult);

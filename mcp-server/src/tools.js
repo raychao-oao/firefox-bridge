@@ -116,6 +116,28 @@ export function registerTools(server, bridgeClient) {
   );
 
   server.registerTool(
+    'draw_stroke',
+    {
+      description:
+        "Draw one or more freehand strokes on an element (typically a signature <canvas>) in a leased tab, by dispatching pointerdown/mousedown, a pointermove/mousemove per point, then pointerup/mouseup at the last point, for each stroke. `strokes` is a list of strokes; each stroke is a list of [x, y] points (at least 2 for a visible line). By default `units` is \"ratio\": x and y are 0-1 fractions of the element's box (0,0 = top-left, 1,1 = bottom-right), independent of devicePixelRatio and CSS scaling; pass `units: \"px\"` for CSS-pixel offsets from the element's top-left instead. Give enough points per stroke (dozens, evenly spaced) for the line to look smooth -- the page draws straight segments between consecutive points. Pass `frameId` to target a specific frame; omit it for the same frame-fallback search as `click`/`hover`. IMPORTANT: all events are untrusted synthetic events (`isTrusted: false`) with pointerId 1 / pointerType mouse, and this tool never moves the real cursor. A page whose handler checks `isTrusted`, or calls `canvas.setPointerCapture(event.pointerId)` without try/catch (throws for a pointer that is not really active, aborting its pointerdown), will silently draw nothing -- `ok: true` only means the events were dispatched, so verify the result on the page (e.g. screenshot, or read the form state). Returns `element_not_found` if the selector is valid but matches nothing, `invalid_selector` on a CSS syntax error, `zero_size_element` if the element has no layout box.",
+      inputSchema: {
+        tabId: z.number(),
+        selector: z.string(),
+        strokes: z
+          .array(z.array(z.tuple([z.number(), z.number()])).min(1).max(1000))
+          .min(1)
+          .max(20),
+        units: z.enum(['ratio', 'px']).optional(),
+        frameId: z.number().optional(),
+      },
+    },
+    async ({ tabId, selector, strokes, units, frameId }) => {
+      const result = await bridgeClient.call({ type: 'draw_stroke', tabId, selector, strokes, units, frameId });
+      return toolResult(result);
+    }
+  );
+
+  server.registerTool(
     'read_page',
     {
       description:

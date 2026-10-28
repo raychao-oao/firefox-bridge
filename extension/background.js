@@ -1079,6 +1079,8 @@ async function handleNativeMessage(msg) {
         return respond(await forwardToContentScript(msg));
       case 'hover':
         return respond(await forwardToContentScript(msg));
+      case 'draw_stroke':
+        return respond(await forwardToContentScript(msg));
       case 'select_option':
         return respond(await forwardToContentScript(msg));
       case 'wait_for':
@@ -2286,7 +2288,7 @@ async function forwardToContentScript(msg) {
     }
     return searchFramesForResult(msg, (frameId) => sendToFrame(msg.tabId, frameId, msg));
   }
-  if (msg.type === 'hover') {
+  if (msg.type === 'hover' || msg.type === 'draw_stroke') {
     if (msg.frameId != null) {
       const gate = await privilegedGate(msg, { frameId: msg.frameId });
       if (!gate.ok) return gate;
