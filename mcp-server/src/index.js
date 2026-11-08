@@ -7,7 +7,7 @@ import { registerTools } from './tools.js';
 
 async function main() {
   const bridgeClient = new BridgeClient({ socketDir: bridgeDir() });
-  await bridgeClient.connect();
+  await bridgeClient.start();
 
   const server = new McpServer({ name: 'firefox-bridge', version: '0.1.0' });
   registerTools(server, bridgeClient);

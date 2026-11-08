@@ -110,6 +110,24 @@ export class BridgeClient extends EventEmitter {
     }
   }
 
+  // Connects if the native host is up; otherwise keeps retrying in the
+  // background instead of throwing. The native host only exists while
+  // Firefox is running with the extension, and MCP clients often start their
+  // servers before the browser (e.g. right after login). Failing here made the
+  // whole server exit, and some clients then give up on it for the rest of the
+  // app session. Until the first connection lands, call() answers
+  // bridge_disconnected, the same as during any other reconnect window.
+  async start() {
+    try {
+      await this.connect();
+    } catch (err) {
+      process.stderr.write(
+        `bridge-client: native host not reachable yet (${err.code || err.message}); retrying in the background\n`
+      );
+      this._scheduleReconnect();
+    }
+  }
+
   _handleMessage(msg) {
     if (this._authWaiter && msg.type === 'auth-ok') {
       this._authWaiter(msg);

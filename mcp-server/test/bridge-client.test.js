@@ -155,3 +155,27 @@ test('a pending call() rejects when the server disconnects before responding', a
     client.close();
   }, { respondToRequests: false });
 });
+
+test('start() does not throw when the native host is not running, and connects once it appears', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'fb-bridge-client-test-'));
+  const token = 'late-token';
+  const client = new BridgeClient({ socketDir: dir });
+  let server;
+  try {
+    await client.start(); // no token file, no socket: must resolve, not reject
+    assert.equal(client.connected, false);
+    assert.deepEqual(await client.call({ type: 'list_tabs' }), { ok: false, error: 'bridge_disconnected' });
+
+    await writeFile(path.join(dir, 'token'), token, { mode: 0o600 });
+    server = await makeFakeServer(bridgeSocketPath(dir), token, {
+      onRequest: (msg, respond) => respond({ requestId: msg.requestId, ok: true }),
+    });
+    for (let i = 0; i < 100 && !client.connected; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(client.connected, true);
+    assert.equal((await client.call({ type: 'list_tabs' })).ok, true);
+  } finally {
+    client.close();
+    server?.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
