@@ -124,7 +124,7 @@ export function registerTools(server, bridgeClient) {
         tabId: z.number(),
         selector: z.string(),
         strokes: z
-          .array(z.array(z.tuple([z.number(), z.number()])).min(1).max(1000))
+          .array(z.array(z.array(z.number()).length(2)).min(1).max(1000))
           .min(1)
           .max(20),
         units: z.enum(['ratio', 'px']).optional(),

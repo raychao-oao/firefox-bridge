@@ -338,3 +338,24 @@ test('draw_stroke validates strokes and forwards the full payload to the bridge'
     frameId: 2,
   });
 });
+
+// The Claude API (and other strict clients) reject a whole MCP server when one
+// tool's input schema uses the draft-07 tuple form `items: [...]` (what
+// z.tuple() renders to). Every schema must stay within plain object/array forms.
+test('no tool input schema renders a tuple (array-valued items)', async () => {
+  const { toJsonSchemaCompat } = await import('@modelcontextprotocol/sdk/server/zod-json-schema-compat.js');
+  const server = makeFakeServer();
+  registerTools(server, makeFakeBridgeClient({ ok: true }));
+  const offenders = [];
+  const walk = (node, where) => {
+    if (Array.isArray(node)) return node.forEach((n, i) => walk(n, `${where}[${i}]`));
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node.items) || 'prefixItems' in node) offenders.push(where);
+    for (const [k, v] of Object.entries(node)) walk(v, `${where}.${k}`);
+  };
+  for (const [name, { config }] of server.registrations) {
+    if (!config.inputSchema) continue;
+    walk(toJsonSchemaCompat(z.object(config.inputSchema), {}), name);
+  }
+  assert.deepEqual(offenders, []);
+});
