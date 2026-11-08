@@ -1208,8 +1208,21 @@ async function handleAcquireTab(msg) {
   if (msg.tabId != null && msg.windowId != null) {
     return { ok: false, error: 'window_id_requires_new_tab' };
   }
+  // Grouping and background opening only apply to tabs this call creates:
+  // moving or re-focusing a tab the user already has open is not what a
+  // caller asking for "a new tab in the agent's group" means.
+  if (msg.tabId != null && (msg.group != null || msg.background != null)) {
+    return { ok: false, error: 'group_requires_new_tab' };
+  }
+  if (msg.group != null && (typeof msg.group !== 'string' || !msg.group.trim())) {
+    return { ok: false, error: 'invalid_group_name' };
+  }
+  if (msg.group != null && !(browser.tabs.group && browser.tabGroups)) {
+    return { ok: false, error: 'tab_groups_unsupported' };
+  }
   let tab;
   let urlPending = false;
+  let groupId;
   if (msg.tabId != null) {
     const owner = leaseOwner.get(msg.tabId);
     if (owner && owner !== sessionId) return { ok: false, error: 'conflict' };
@@ -1281,6 +1294,7 @@ async function handleAcquireTab(msg) {
         url,
         ...(msg.windowId != null ? { windowId: msg.windowId } : {}),
         ...(msg.cookieStoreId != null ? { cookieStoreId: msg.cookieStoreId } : {}),
+        ...(msg.background === true ? { active: false } : {}),
       });
 
     if (shouldWaitForCommit) {
@@ -1306,14 +1320,52 @@ async function handleAcquireTab(msg) {
     return { ok: false, error: 'conflict' };
   }
   leaseOwner.set(tab.id, sessionId);
+  if (msg.group != null) {
+    try {
+      groupId = await addTabToNamedGroup(tab, msg.group.trim());
+    } catch (err) {
+      // The tab exists and is leased; report the grouping failure without
+      // throwing the tab away, so the caller can still use or close it.
+      return {
+        ok: true,
+        tabId: tab.id,
+        url: tab.url,
+        cookieStoreId: tab.cookieStoreId,
+        windowId: tab.windowId,
+        groupError: `group_failed: ${err.message}`,
+        ...(urlPending ? { urlPending: true } : {}),
+      };
+    }
+  }
   return {
     ok: true,
     tabId: tab.id,
     url: tab.url,
     cookieStoreId: tab.cookieStoreId,
     windowId: tab.windowId,
+    ...(groupId != null ? { groupId } : {}),
     ...(urlPending ? { urlPending: true } : {}),
   };
+}
+
+// Puts a tab into the group with this exact title in the tab's window,
+// creating the group (and naming it) when the window has none. One group per
+// title per window keeps an agent's tabs together the way the user sees them
+// in the tab strip, without opening a separate window.
+async function addTabToNamedGroup(tab, title) {
+  // tabGroups.query matches titles as globs; compare exactly afterwards.
+  const groups = await browser.tabGroups.query({ windowId: tab.windowId });
+  const existing = groups.find((g) => g.title === title);
+  if (existing) {
+    await browser.tabs.group({ tabIds: [tab.id], groupId: existing.id });
+    return existing.id;
+  }
+  const groupId = await browser.tabs.group({
+    tabIds: [tab.id],
+    createProperties: { windowId: tab.windowId },
+  });
+  await browser.tabGroups.update(groupId, { title });
+  return groupId;
 }
 
 async function handleOpenPrivateWindow(msg) {

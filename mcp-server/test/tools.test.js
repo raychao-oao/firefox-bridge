@@ -338,3 +338,16 @@ test('draw_stroke validates strokes and forwards the full payload to the bridge'
     frameId: 2,
   });
 });
+
+test('acquire_tab forwards background and group to the extension', async () => {
+  const server = makeFakeServer();
+  const bridgeClient = makeFakeBridgeClient({ ok: true, tabId: 7, groupId: 3 });
+  registerTools(server, bridgeClient);
+  const { config, handler } = server.registrations.get('acquire_tab');
+  assert.ok(config.inputSchema.background);
+  assert.ok(config.inputSchema.group);
+  await handler({ url: 'https://example.com/', background: true, group: 'Claude' });
+  assert.equal(bridgeClient.calls[0].type, 'acquire_tab');
+  assert.equal(bridgeClient.calls[0].background, true);
+  assert.equal(bridgeClient.calls[0].group, 'Claude');
+});
