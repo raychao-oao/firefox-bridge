@@ -15,6 +15,7 @@
   "permissions": [
     "nativeMessaging",
     "tabs",
+    "tabGroups",
     "activeTab",
     "webNavigation",
     "webRequest",
